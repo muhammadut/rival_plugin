@@ -250,7 +250,8 @@ When the agent returns, parse its Task Result:
 After a successful task, run a quick Gemini sanity check on the commit:
 
 ```bash
-gemini -p "Review this git commit for correctness against its spec.
+gemini --model gemini-3-pro-preview \
+  -p "Review this git commit for correctness against its spec.
 
 ## Spec (what should have been built):
 $(head -30 .rival/workstreams/<id>/tasks/task-<N.M>.md)

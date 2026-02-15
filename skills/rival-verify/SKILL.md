@@ -151,7 +151,8 @@ Write to `.rival/workstreams/<id>/gemini-verify-prompt.md`.
 ### Path A: Gemini Available
 
 ```bash
-gemini -p "$(cat .rival/workstreams/<id>/gemini-verify-prompt.md)" \
+gemini --model gemini-3-pro-preview \
+  -p "$(cat .rival/workstreams/<id>/gemini-verify-prompt.md)" \
   --include-directories . \
   --yolo \
   --output-format json \

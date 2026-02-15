@@ -128,7 +128,8 @@ Write this prompt to `.rival/workstreams/<id>/gemini-review-prompt.md`.
 Invoke Gemini CLI via Bash:
 
 ```bash
-gemini -p "$(cat .rival/workstreams/<id>/gemini-review-prompt.md)" \
+gemini --model gemini-3-pro-preview \
+  -p "$(cat .rival/workstreams/<id>/gemini-review-prompt.md)" \
   --include-directories . \
   --yolo \
   --output-format json \
