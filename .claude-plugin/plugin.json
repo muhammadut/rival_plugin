@@ -1,0 +1,6 @@
+{
+  "name": "rival",
+  "version": "0.1.0",
+  "description": "Two-AI development workflow: Claude plans and builds, Gemini reviews. 5-phase process with human approval gates.",
+  "keywords": ["workflow", "gemini", "review", "planning", "architecture"]
+}

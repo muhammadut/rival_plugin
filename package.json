@@ -1,0 +1,13 @@
+{
+  "name": "@anthropic/rival-plugin",
+  "version": "0.1.0",
+  "description": "Two-AI development workflow: Claude plans and builds, Gemini reviews. 5-phase process with human approval gates.",
+  "keywords": ["claude-code-plugin", "workflow", "gemini", "review", "planning", "architecture"],
+  "license": "MIT",
+  "files": [
+    ".claude-plugin/",
+    "skills/",
+    "agents/",
+    "frameworks/"
+  ]
+}
