@@ -1,0 +1,19 @@
+{
+  "name": "rival-plugin",
+  "owner": {
+    "name": "muhammadut"
+  },
+  "metadata": {
+    "description": "Two-AI development workflow: Claude plans and builds, Gemini reviews."
+  },
+  "plugins": [
+    {
+      "name": "rival",
+      "source": ".",
+      "description": "Two-AI development workflow with 5-phase process and human approval gates.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "keywords": ["workflow", "gemini", "review", "planning", "architecture"]
+    }
+  ]
+}
