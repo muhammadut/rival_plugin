@@ -172,6 +172,27 @@ Task(subagent_type="rival:adr-writer", description="ADR Drafts: <feature>", prom
 
 Collect all results.
 
+### Save Raw Agent Outputs
+
+Before using the results for context mapping, persist each agent's raw output to disk.
+This creates an audit trail — you can trace any task card's content back to its source.
+
+Write each agent's result to `.rival/workstreams/<id>/agent-outputs/`:
+
+```
+.rival/workstreams/<id>/agent-outputs/test-strategist.md
+.rival/workstreams/<id>/agent-outputs/bdd-writer.md       (if BDD enabled)
+.rival/workstreams/<id>/agent-outputs/adr-writer.md        (if ADR enabled)
+```
+
+Each file should contain the agent's complete, unmodified output. Do NOT summarize or
+edit — save exactly what the agent returned.
+
+This serves three purposes:
+1. **Auditability** — if a task card has wrong test scenarios, trace it back to the source
+2. **Resumability** — if blueprinting is interrupted, these outputs survive context clearing
+3. **Education** — `rival-educate` can reference these to explain test strategy decisions
+
 ## Phase 4: Context Mapping
 
 This is the intellectual core of blueprinting. You are distributing intelligence to tasks.
