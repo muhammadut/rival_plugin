@@ -14,7 +14,7 @@
         "repo": "muhammadut/rival_plugin"
       },
       "description": "Two-AI development workflow with 5-phase process and human approval gates.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "license": "MIT",
       "keywords": ["workflow", "gemini", "review", "planning", "architecture"]
     }
