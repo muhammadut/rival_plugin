@@ -111,10 +111,10 @@ Phase-to-next-command mapping:
 - `planning`, `plan-ready` → "Complete planning with `/rival:rival-plan`"
 - `plan-approved` → "`/rival:rival-review`"
 - `reviewing`, `review-ready` → "Complete review with `/rival:rival-review`"
-- `review-approved` → "`/rival:rival-blueprint`"
+- `review-approved` → "`/rival:rival-execute` (parallel, recommended) or `/rival:rival-blueprint` (classic path)"
 - `blueprinting`, `blueprint-ready` → "Complete blueprint with `/rival:rival-blueprint`"
-- `blueprint-approved` → "`/rival:rival-build`"
-- `building` → "Continue building with `/rival:rival-build`"
+- `blueprint-approved` → "`/rival:rival-build` (sequential) or `/rival:rival-execute` (parallel with Agent Teams)"
+- `building` → "Continue building with `/rival:rival-build` or `/rival:rival-execute`"
 - `build-complete` → "`/rival:rival-verify`"
 - `verifying`, `verification-ready` → "Complete verification with `/rival:rival-verify`"
 

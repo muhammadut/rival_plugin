@@ -30,7 +30,7 @@ Determine which workstream to review using this priority:
 Read the workstream's `state.json`. The phase must be `plan-approved`.
 
 - If `planning` or `plan-ready`: "The plan isn't approved yet. Run `/rival:rival-plan` first to complete and approve the plan."
-- If `review-approved` or later: "This workstream has already been reviewed. Current phase: `<phase>`. Next step: `/rival:rival-blueprint`"
+- If `review-approved` or later: "This workstream has already been reviewed. Current phase: `<phase>`. Next step: `/rival:rival-execute` (parallel) or `/rival:rival-blueprint` (classic)"
 - If `plan-approved`: proceed.
 
 Update state to `reviewing`.
@@ -225,7 +225,10 @@ Present both the review and your decisions to the user:
 > 3. **Request another round** — send back for re-review"
 
 On **Approve**: Update state to `review-approved`.
-> "Review approved. Next step: `/rival:rival-blueprint` to create the detailed task breakdown."
+> "Review approved. Choose your execution path:
+>
+> - **`/rival:rival-execute`** — Agent Teams parallel build (recommended). Spawns a team of workers with a Context Engineer and Sentinel. Skips the blueprint phase — each worker gets its own fresh context window. Faster, higher token cost.
+> - **`/rival:rival-blueprint`** → **`/rival:rival-build`** — Classic sequential path. Pre-computes task cards, then dispatches one agent per task. Slower, lower token cost."
 
 On **Override**: Update the specific decisions, re-present.
 
