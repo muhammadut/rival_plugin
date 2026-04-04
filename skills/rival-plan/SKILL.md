@@ -17,9 +17,9 @@ Read `.rival/config.json`. If it doesn't exist, stop and tell the user:
 > "Rival isn't configured for this project yet. Run `/rival:rival-init` first."
 
 Store the config values — you'll need them throughout:
-- `project_type` (brownfield/greenfield)
-- `stack` (language, framework, test_framework, orm, runtime)
-- `repos` (array of {name, path, role, source})
+- `workspace_type` (always "multi-repo" in parent-directory workflow)
+- `index.repos` (array of all indexed repos: {name, path, language, framework})
+- `index.knowledge_sources` (wiki directories, docs, etc.)
 - `experts` (array of expert domain strings)
 - `review.tool` (codex/skeptical-reviewer), `review.fallback`
 
@@ -83,6 +83,64 @@ Write `.rival/workstreams/<id>/state.json`:
 Tell the user:
 > "Starting planning for: **<feature>**
 > Workstream: `<id>`"
+
+### 1.6 Primary Repo Selection
+
+The workspace contains many repos (from `index.repos`). Ask the user which repo is the primary target for this feature.
+
+Look at the feature description and the indexed repos. Suggest the most likely primary repo based on name/framework match:
+
+> "For '**<feature description>**', which repo is the primary target?
+>
+> Suggested: **connector-api** (C# / ASP.NET Core) — name matches the feature context
+>
+> Or choose from: <list of other repos that could be relevant>
+>
+> [Accept suggestion] [Choose different repo]"
+
+Store the primary repo in the workstream state:
+```json
+{
+  "primary_repo": {"name": "connector-api", "path": "./connector-api", "language": "csharp"}
+}
+```
+
+### 1.7 Dynamic Dependency Discovery
+
+After the user confirms the primary repo, automatically trace its dependencies to discover connected repos:
+
+1. Read the primary repo's project files:
+   - `.csproj` files: `<ProjectReference Include="../other-repo/...">` and `<PackageReference>` that match indexed repo names
+   - `package.json`: workspace references, `file:` dependencies, shared package names
+   - Import/require statements referencing paths outside the repo (`../shared-models/`)
+   - Docker-compose, CI config, or infrastructure files referencing other services
+
+2. For each connected repo found, trace ITS dependencies too (one more level deep).
+
+3. Present the discovered graph:
+> "**connector-api** connects to:
+>   → **shared-models** (ProjectReference in connector-api.csproj)
+>   → **rpm-gateway** (imports ConnectorClient from connector-api)
+>   → **quotation-api** (both reference shared-models)
+>
+> These 4 repos will be the focus of analysis. The other <N> indexed repos are available if agents need them."
+
+4. Also check `index.knowledge_sources` — if a wiki/ exists, note it as available for context.
+
+Store in workstream state:
+```json
+{
+  "primary_repo": {"name": "connector-api", "path": "./connector-api"},
+  "connected_repos": [
+    {"name": "shared-models", "path": "./shared-models", "relationship": "ProjectReference"},
+    {"name": "rpm-gateway", "path": "./rpm-gateway", "relationship": "imports ConnectorClient"},
+    {"name": "quotation-api", "path": "./quotation-api", "relationship": "shared dependency"}
+  ],
+  "knowledge_sources": [{"name": "wiki", "path": "./wiki"}]
+}
+```
+
+Agents will focus on primary + connected repos, but can search any indexed repo if they discover additional connections during exploration.
 
 ## Phase 2: Inline Triage
 
@@ -216,13 +274,15 @@ For DISCUSSION mode: skip to Phase 6.5 (present discussion document instead of p
 
 ## Phase 4: Codebase Analysis Phase
 
-What gets spawned depends on triage size:
+Which agents get spawned depends on triage size:
 
 | Agent | LIGHT | MEDIUM | LARGE |
 |-------|-------|--------|-------|
-| code-explorer | LIGHT budget | MEDIUM budget | LARGE budget |
-| pattern-detector | skip | MEDIUM budget | LARGE budget |
+| code-explorer | yes | yes | yes |
+| pattern-detector | skip | yes | yes |
 | security-analyzer | skip | after code-explorer | after code-explorer |
+
+Agents explore as deeply as needed — no artificial budget caps. Trust the model to stop when it has enough information.
 
 ### 4.1 Batch 1 — Parallel Agents
 
@@ -237,13 +297,17 @@ Agent(
     ## Feature Request
     <feature description>
 
-    ## Repos
-    <JSON array of repos from config>
+    ## Primary Repo
+    <primary repo name and path from Phase 1.6>
 
-    ## Budget
-    <LIGHT|MEDIUM|LARGE>
+    ## Connected Repos (discovered via dependency tracing)
+    <JSON array of connected repos from Phase 1.7>
 
-    Find all relevant code, symbols, and gaps across all repos.
+    ## All Indexed Repos (search these if you discover additional connections)
+    <JSON array of all repos from config.index.repos>
+
+    Find all relevant code, symbols, and gaps. Focus on primary + connected repos
+    but explore any indexed repo if you discover dependencies beyond the initial graph.
   "
 )
 ```
@@ -257,13 +321,17 @@ Agent(
     ## Feature Request
     <feature description>
 
-    ## Repos
-    <JSON array of repos from config>
+    ## Primary Repo
+    <primary repo name and path>
 
-    ## Budget
-    <MEDIUM|LARGE>
+    ## Connected Repos
+    <JSON array of connected repos>
 
-    Detect codebase conventions and patterns across all repos.
+    ## All Indexed Repos
+    <JSON array of all repos>
+
+    Detect codebase conventions and patterns. Focus on primary + connected repos.
+    Check if patterns are consistent across repos or repo-specific.
   "
 )
 ```
@@ -283,13 +351,19 @@ Agent(
     ## Feature Request
     <feature description>
 
-    ## Repos
-    <JSON array of repos from config>
+    ## Primary Repo
+    <primary repo name and path>
+
+    ## Connected Repos
+    <JSON array of connected repos>
+
+    ## All Indexed Repos
+    <JSON array of all repos>
 
     ## Code Explorer Results
     <paste full code-explorer output>
 
-    Trace blast radius and identify security risks.
+    Trace blast radius and identify security risks across all affected repos.
   "
 )
 ```
@@ -313,7 +387,9 @@ Write `.rival/workstreams/<id>/plan.md` with this EXACT structure:
 - Workstream: <id>
 - Created: <timestamp>
 - Size: LIGHT | MEDIUM | LARGE
-- Repos: <list of repos involved, with roles>
+- Primary repo: <name> (<language> / <framework>)
+- Connected repos: <list of repos discovered via dependency tracing>
+- Total indexed repos: <N> (available if needed)
 - Review: <Codex reviewed / Claude reviewed / not reviewed (LIGHT)>
 - Lessons applied: <list of lessons from .rival/knowledge/ that were relevant, or "None — first workstream">
 

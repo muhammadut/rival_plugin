@@ -1,134 +1,106 @@
 ---
 name: rival-init
-description: Initialize Rival for this project. Detects stack, configures multi-repo, expert domains, and review tools.
+description: Initialize Rival by indexing all available repos, detecting stacks, configuring expert domains, and review tools.
 user-invocable: true
 ---
 
-# Rival Init v1.0 — Project Configuration
+# Rival Init v1.0 — Workspace Indexing
 
-You are the Rival initialization orchestrator. Your job is to configure Rival for this project by detecting the tech stack, discovering related repos, identifying expert domains, checking review tools, and writing a complete config.
+You are the Rival initialization orchestrator. Your job is to index every repo in the current workspace directory, detect each repo's tech stack, identify expert domains across the entire codebase, check for review tools, and write a complete config.
 
-Use AskUserQuestion for all user interactions. Auto-detect as much as possible, always confirm detected values.
+The expected directory layout is a parent directory containing all repos:
+
+```
+D:\azure-devops\          <- Claude Code opens HERE
+  .env                    <- PAT + Azure DevOps config (optional)
+  carrier-service\
+  quotation-api\
+  shared-models\
+  rpm-gateway\
+  billing-service\
+  ... (could be 100 repos)
+  wiki\                   <- downloaded wiki content
+```
+
+Init indexes everything. It does NOT ask which repo to work on — that is rival-plan's job. It does NOT ask the user to describe each repo's role — with 100 repos that would be unbearable. Roles are discovered dynamically during planning via dependency tracing.
+
+Do NOT use AskUserQuestion — just ask questions via normal text output and wait for a response.
 
 ## Process
 
-### Step 1: Check for Existing Configuration
+### Step 1: Check Existing Configuration
 
 Read `.rival/config.json` to check if Rival is already configured.
 
-- **If it exists:** Show a summary of the current config (project type, stack, repos, experts, review tool). Then ask:
+- **If it exists:** Show a summary of the current config (workspace type, repo count, language breakdown, experts, review tool). Then ask:
   > "Rival is already configured (v{version}). Do you want to:
   > 1. Keep current configuration
-  > 2. Reconfigure from scratch (re-detects stack, repos, experts)
-  > 3. Refresh — keep repos and experts, re-detect stack only"
+  > 2. Reconfigure from scratch (re-scans all repos, experts, review tool)
+  > 3. Refresh — keep expert domains, re-scan repo index only"
 
   If the user chooses to keep, stop here and show the config summary.
   If reconfigure or refresh, continue to the appropriate step.
 
 - **If it doesn't exist:** Continue with full setup from Step 2.
 
-### Step 2: Determine Project Type
+### Step 2: Scan for Environment Config
 
-Check for existing source code to auto-detect brownfield vs greenfield.
+Look for `.env`, `.paths.md`, or similar config files in the current directory.
 
-Use Glob to look for source files:
-- `**/*.ts`, `**/*.js`, `**/*.py`, `**/*.cs`, `**/*.go`, `**/*.java`, `**/*.rb`, `**/*.rs`
+Check for:
+- **Azure DevOps PAT** — env vars like `AZURE_DEVOPS_PAT`, `ADO_PAT`, or entries in `.env`
+- **Azure DevOps organization URL** — e.g., `https://dev.azure.com/myorg`
+- **Azure DevOps project name** — e.g., `RPM-Backend`
+- **GitHub PATs** — `GITHUB_TOKEN`, `GH_TOKEN`
 
-If source files exist, suggest **brownfield**. If the project is empty or only has config files, suggest **greenfield**.
+If found:
+- Store DevOps config for later use (wiki access, board integration, PR creation)
+- Report what was detected: "Found Azure DevOps config: org=myorg, project=RPM-Backend, PAT configured"
 
-Ask the user to confirm:
-> "This looks like a **brownfield** project (existing codebase detected). Is that correct?"
+If not found:
+- Proceed without DevOps integration
+- Note: "No .env or DevOps config found. Proceeding without DevOps integration. You can add a .env later with ADO_PAT, ADO_ORG, ADO_PROJECT."
 
-Present options:
-1. Brownfield (existing codebase)
-2. Greenfield (new project)
+Do NOT fail or block on missing environment config — it is entirely optional.
 
-If **greenfield**: skip Step 4 (multi-repo discovery) and Step 6 (expert domain suggestions). Proceed directly to Step 3 for stack detection (user declares intended stack), then jump to Step 7.
+### Step 3: Index All Repos
 
-### Step 3: Detect Tech Stack
+Scan the current directory for all subdirectories that look like code repos. Only scan **one level deep** (do not recurse into subdirectories of subdirectories).
 
-Auto-detect the stack by checking for known files. Use Glob to search for:
+For each immediate subdirectory, check if it contains project markers:
 
 | File Pattern | Language | Framework Hint |
 |---|---|---|
 | `package.json` | TypeScript/JavaScript | Read it for framework deps (express, next, fastify, nest) |
 | `tsconfig.json` | TypeScript | Confirms TS over JS |
-| `*.csproj`, `*.sln` | C# | Read csproj for ASP.NET, Blazor, etc. |
+| `*.csproj`, `*.sln` | C# | Read csproj for ASP.NET, Blazor, classlib, etc. |
 | `pyproject.toml`, `setup.py`, `requirements.txt` | Python | Read for Django, FastAPI, Flask |
 | `go.mod` | Go | Read for Gin, Echo, Fiber |
 | `Cargo.toml` | Rust | Read for Actix, Axum |
 | `Gemfile` | Ruby | Read for Rails, Sinatra |
 | `pom.xml`, `build.gradle` | Java | Read for Spring Boot |
 
-For the detected language, also detect:
-- **Test framework:** Look for `jest.config.*`, `vitest.config.*`, `pytest.ini`, `*.test.*`, `*_test.go`, `xunit`, `nunit`
-- **ORM:** Look for Sequelize, Prisma, Entity Framework, SQLAlchemy, GORM, ActiveRecord references
-- **Runtime:** node, deno, bun, dotnet, python, go
+For each repo found, detect:
+- **Language** — primary language based on project markers
+- **Framework** — inferred from dependencies (e.g., aspnet-core, express, fastapi)
+- **Test framework** — look for jest.config.*, vitest.config.*, pytest.ini, xunit/nunit references, *_test.go
+- **ORM** — look for Entity Framework, Prisma, Sequelize, SQLAlchemy, GORM, ActiveRecord references
+- **Runtime** — node, deno, bun, dotnet, python, go, etc.
 
-Present the detected stack and ask the user to confirm or correct:
+Also identify **non-code directories** — subdirectories that contain no project markers but have content like markdown files, documentation, or wiki content. Index these as **knowledge sources** with their type (wiki, docs, etc.).
 
-> "Detected stack:
-> - Language: C#
-> - Framework: ASP.NET Core
-> - Test framework: xUnit
-> - ORM: EF Core
-> - Runtime: .NET 8
+Present a summary to the user:
+
+> "Found **N** repos (X C#, Y TypeScript, Z Python) and **M** knowledge sources"
 >
-> Is this correct? Adjust any values?"
+> Repos: carrier-service (C#), quotation-api (C#), shared-models (C#), rpm-gateway (TypeScript), ...
+> Knowledge: wiki
 
-Use AskUserQuestion to let them confirm or provide corrections for each field.
+Do NOT ask the user to confirm or describe each repo. Just report what was found.
 
-### Step 4: Multi-repo Discovery
+### Step 4: Expert Domain Detection
 
-**Skip this step if the project is greenfield.**
-
-Scan the parent directory (`../`) for sibling repositories that might be part of the same system.
-
-Look for directories containing:
-- Same language markers as the current project (e.g., `*.csproj` if current is C#)
-- Common project files: `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`, `.git/`
-- Different language markers too (polyglot systems are common)
-
-**Edge cases:**
-- If the parent directory is not accessible (permissions, network drive): skip sibling scan, only use current repo. Inform the user: "Could not scan parent directory. You can manually add repos below."
-- If user provides relative paths with `../`: resolve them, verify the path exists and contains source code.
-- If sibling repos have a different language: still offer them (polyglot systems). Note the language difference.
-
-Present discovered repos and ask user to confirm which are related:
-
-> "Found these repositories alongside this project:
-> 1. ../carrier-service (C#, .csproj detected)
-> 2. ../notification-hub (TypeScript, package.json detected)
-> 3. ../infra-scripts (no source files — config/scripts only)
->
-> Which of these are part of your system? Select all that apply.
-> You can also add paths manually (e.g., `../other-repo`)."
-
-Use AskUserQuestion with multiSelect to let the user pick repos. Also accept manual path input.
-
-### Step 5: Repo Role Descriptions
-
-**Skip this step if no additional repos were selected in Step 4.**
-
-For each selected repo (including the current one), ask the user to describe its role in one line. This context is critical for agents that explore across repos.
-
-> "Describe each repo's role (one line each):
-> - **rpm-backend** (this repo): "
-> - **carrier-service**: "
-> - **notification-hub**: "
-
-Example roles:
-- "Main RPM backend API — handles orders, users, pricing"
-- "Calls external carrier APIs, handles rate quotes and label generation"
-- "Sends emails, SMS, push notifications via Azure Service Bus triggers"
-
-Store each repo entry with: `name`, `path` (relative), `role` (user-provided), `source` ("local").
-
-### Step 6: Expert Domain Detection
-
-**Skip this step if the project is greenfield (no code to scan).**
-
-Infer expert domains from code patterns. Scan for:
+Scan imports, references, and config files across ALL indexed repos for domain-specific patterns:
 
 | Pattern | Expert Domain |
 |---|---|
@@ -149,17 +121,15 @@ Infer expert domains from code patterns. Scan for:
 | GCP imports | `gcp` |
 | Kubernetes manifests, Helm charts | `kubernetes` |
 
-Present detected domains and ask user for additions:
+Present detected domains and ask the user for additions:
 
-> "Detected expert domains: **azure**, **ef-core**, **service-bus**
+> "Detected expert domains: **azure**, **ef-core**, **service-bus**, **apim**
 >
 > These domains drive the expert-researcher agent during planning. It will pull in specialized knowledge for each domain.
 >
 > Add more? (comma-separated, or press Enter to confirm)"
 
-Use AskUserQuestion to accept additions.
-
-### Step 7: Review Tool Detection
+### Step 5: Review Tool Detection
 
 Check if Codex CLI is installed:
 
@@ -174,7 +144,6 @@ If Codex is found, try to detect the model version from its output or config. St
 
 Try to detect if an API key is configured:
 ```bash
-# Check for common env vars
 echo $OPENAI_API_KEY | head -c 5 2>/dev/null
 ```
 If no key detected, warn the user:
@@ -185,31 +154,15 @@ If Codex is not found:
 
 Always set `review.fallback = "skeptical-reviewer"`.
 
-### Step 8: Check .paths.md
+Do NOT check for Gemini CLI — it has been replaced by Codex.
 
-Look for `.paths.md` in:
-1. Project root (current directory)
-2. User home directory (`~/`)
-
-If found:
-- Read the file for repo URLs, DevOps configuration (Azure DevOps org, project, wiki URLs, board URLs).
-- Extract `provider` (e.g., "azure-devops", "github", "gitlab").
-- Extract available features: repos, wikis, boards, pipelines.
-- Store the path in config as `devops.paths_file`.
-- **Warn the user:** "Found .paths.md — make sure it's in your .gitignore (it may contain org-specific URLs)."
-
-If not found:
-- Set `devops` to `null` in config.
-- Inform the user: "No .paths.md found. DevOps integration is optional. You can add one later with repo URLs and board links."
-- Proceed with local-only discovery.
-
-### Step 9: Create Directory Structure
+### Step 6: Create Directory Structure
 
 Create the following structure:
 
 ```
 .rival/
-  config.json                         (written in Step 10)
+  config.json                         (written in Step 7)
   workstreams/                        (empty directory for workstream state)
   knowledge/
     codebase-patterns.md              (placeholder)
@@ -232,92 +185,118 @@ Write `lessons-learned.md`:
 > Do not delete — agents reference past lessons to avoid repeating mistakes.
 ```
 
-### Step 10: Write Config and Display Summary
+### Step 7: Write Config
 
 Write `.rival/config.json` with all gathered data. Use the current timestamp for `initialized_at`.
 
 Config format:
+
 ```json
 {
   "version": "1.0.0",
-  "project_type": "brownfield|greenfield",
-  "stack": {
-    "language": "csharp",
-    "framework": "aspnet-core",
-    "test_framework": "xunit",
-    "orm": "ef-core",
-    "runtime": "dotnet8"
+  "workspace_type": "multi-repo",
+  "workspace_root": ".",
+  "index": {
+    "repos": [
+      {"name": "carrier-service", "path": "./carrier-service", "language": "csharp", "framework": "aspnet-core", "test_framework": "xunit", "orm": "ef-core", "runtime": "dotnet8"},
+      {"name": "quotation-api", "path": "./quotation-api", "language": "csharp", "framework": "aspnet-core", "test_framework": "xunit", "orm": "ef-core", "runtime": "dotnet8"},
+      {"name": "shared-models", "path": "./shared-models", "language": "csharp", "framework": "classlib", "test_framework": null, "orm": null, "runtime": "dotnet8"},
+      {"name": "rpm-gateway", "path": "./rpm-gateway", "language": "typescript", "framework": "express", "test_framework": "jest", "orm": "prisma", "runtime": "node"}
+    ],
+    "knowledge_sources": [
+      {"name": "wiki", "path": "./wiki", "type": "wiki"}
+    ],
+    "total_repos": 47,
+    "languages": {"csharp": 30, "typescript": 12, "python": 5}
   },
-  "repos": [
-    {"name": "rpm-backend", "path": ".", "role": "Main RPM backend API", "source": "local"},
-    {"name": "carrier-service", "path": "../carrier-service", "role": "Calls external carrier APIs", "source": "local"}
-  ],
-  "experts": ["azure", "ef-core", "service-bus"],
+  "experts": ["azure", "ef-core", "service-bus", "apim"],
   "review": {
-    "tool": "codex|skeptical-reviewer",
+    "tool": "codex",
     "codex_model": "gpt-5.4",
     "fallback": "skeptical-reviewer"
   },
   "devops": {
     "provider": "azure-devops",
-    "paths_file": ".paths.md",
-    "features_available": ["repos", "wikis", "boards"]
+    "organization": "https://dev.azure.com/myorg",
+    "project": "RPM-Backend",
+    "pat_configured": true
   },
   "initialized_at": "2026-04-03T14:30:00Z"
 }
 ```
 
 Notes on config values:
-- `repos`: always includes current repo as first entry with `"path": "."`. Additional repos use relative paths.
+- `workspace_type`: always "multi-repo" in this workflow.
+- `workspace_root`: always "." — the parent directory where Claude Code was launched.
+- `index.repos`: FLAT list of ALL discovered repos. Each entry has `name`, `path` (relative, prefixed with `./`), `language`, `framework`, and optionally `test_framework`, `orm`, `runtime`. There are NO role fields — roles are discovered dynamically during planning.
+- `index.knowledge_sources`: non-code directories like wiki/ or docs/.
+- `index.total_repos`: count of repos in the index (convenience field).
+- `index.languages`: breakdown of repos by primary language (convenience field).
 - `experts`: flat array of domain strings. Used by the expert-researcher agent during planning.
 - `review.tool`: "codex" if Codex CLI detected, otherwise "skeptical-reviewer".
 - `review.codex_model`: only present if Codex detected. Extracted from `codex --version` output.
 - `review.fallback`: always "skeptical-reviewer".
-- `devops`: `null` if no .paths.md found.
+- `devops`: DevOps integration config. Contains `provider`, `organization`, `project`, and `pat_configured`. Set to `null` if no .env or DevOps config was found.
 - `initialized_at`: ISO 8601 UTC timestamp of when init completed.
 
-Display the summary box:
+### Step 8: Display Summary
+
+Display a summary box adapted to actual detected values:
 
 ```
-╔══════════════════════════════════════════════════╗
-║              Rival v1.0 Initialized              ║
-╠══════════════════════════════════════════════════╣
-║ Project: brownfield                              ║
-║ Stack: C# / ASP.NET Core / xUnit / EF Core      ║
-║ Repos: 4 (this + 3 related)                     ║
-║ Experts: azure, ef-core, service-bus, apim       ║
-║ Review: Codex CLI (gpt-5.4)                      ║
-║ Knowledge: .rival/knowledge/ (empty, will grow)  ║
-╚══════════════════════════════════════════════════╝
++======================================================+
+|              Rival v1.0 Initialized                   |
++======================================================+
+| Workspace: D:\azure-devops (multi-repo)               |
+| Repos indexed: 47                                     |
+|   C#: 30 | TypeScript: 12 | Python: 5                |
+| Knowledge sources: wiki                               |
+| Experts: azure, ef-core, service-bus, apim            |
+| Review: Codex CLI (gpt-5.4)                           |
+| DevOps: Azure DevOps (PAT configured)                 |
+| Knowledge: .rival/knowledge/ (empty, will grow)       |
++======================================================+
 ```
 
-Adapt the summary to actual detected values. For the Stack line, use friendly display names (e.g., "C#" not "csharp", "ASP.NET Core" not "aspnet-core"). For Repos, show count as "this + N related". If review tool is skeptical-reviewer, show "Built-in skeptical reviewer (no Codex)".
+Adapt every line to actual values:
+- **Workspace** — show the absolute path and workspace type.
+- **Repos indexed** — total count from `index.total_repos`.
+- **Language breakdown** — from `index.languages`, show all detected languages with counts.
+- **Knowledge sources** — list names of knowledge sources, or "none" if none found.
+- **Experts** — comma-separated list from `experts` array.
+- **Review** — if Codex: "Codex CLI ({model})". If fallback: "Built-in skeptical reviewer (no Codex)".
+- **DevOps** — if configured: "Azure DevOps (PAT configured)". If not: "Not configured (add .env to enable)".
+- **Knowledge** — always ".rival/knowledge/ (empty, will grow)".
 
 Then suggest the next step:
-> "Rival is ready. Start planning a feature with:
-> `/rival:plan <describe your task>`"
+
+> Start planning: `/rival:rival-plan <describe your feature>`
 
 ## Edge Case Reference
 
 | Situation | Handling |
 |---|---|
-| Parent directory not accessible | Skip sibling scan, only use current repo. Allow manual path input. |
-| Sibling repo has different language | Still offer to include it. Note the language difference in the prompt. Polyglot systems are normal. |
-| User provides relative paths with `../` | Resolve the path, verify it exists and contains source code or a `.git/` directory. Reject if path doesn't exist. |
-| Codex CLI installed but no API key | Detect via env var check. Warn user but still set tool to "codex". |
-| Re-running init on existing project | Offer keep/reconfigure/refresh options (Step 1). Refresh preserves repos and experts, re-detects stack. |
-| Empty project (greenfield) | Skip multi-repo discovery (Step 4), skip repo roles (Step 5), skip expert domain suggestions (Step 6). User declares intended stack in Step 3. |
-| No test framework detected | Set `test_framework` to `null`, ask user to specify or confirm none. |
-| Multiple languages detected | Pick the dominant one (most source files), note others. Ask user to confirm primary language. |
-| .paths.md in .gitignore check | Warn user to add it if not already ignored. Do not modify .gitignore automatically. |
+| Directory has no repos | "No code repos found in the current directory. Are you in the right directory? Rival expects to run from a parent directory containing your repos." Stop init. |
+| 200+ repos | Still index them all. Show summary counts, do not list every repo individually. |
+| Mixed languages | Expected — report the full breakdown (e.g., "C#: 30, TypeScript: 12, Python: 5"). |
+| No .env or PAT | Proceed without DevOps integration. Set `devops` to `null`. Suggest configuring later. |
+| Re-running init | Offer keep/reconfigure/refresh options (Step 1). Refresh preserves expert domains and re-scans the repo index. |
+| Nested repos (subdirectory contains another subdirectory with repos) | Only scan ONE level deep. Do not recurse. |
+| Wiki or docs directory | Index as a knowledge source, not a code repo. |
+| No test framework detected in a repo | Set `test_framework` to `null` for that repo. Do not ask. |
+| Codex CLI installed but no API key | Warn the user but still set `review.tool` to "codex". |
+| Multiple project markers in one directory (e.g., package.json AND *.csproj) | Pick the dominant one (most source files of that type), or if equal, list both languages. |
+| .rival/ directory already exists but no config.json | Treat as fresh init — proceed from Step 2. |
+| Read permissions error on a subdirectory | Skip that directory, note it in output: "Skipped {dir} (permission denied)". |
 
 ## Important Notes
 
-- All user interactions must use AskUserQuestion for structured choices
+- Do NOT use AskUserQuestion — just ask questions via text output
 - Auto-detect as much as possible to minimize user input
-- Always confirm detected values — never silently assume
 - The config file is the single source of truth for all other Rival skills
-- If detection fails for any field, ask the user to provide it manually
-- Do not create any framework selection quiz — frameworks are now reference docs loaded on-demand by the plan agent
-- Do not check for Gemini CLI — it has been replaced by Codex
+- Do NOT check for Gemini CLI — it has been replaced by Codex
+- The role of each repo is NOT defined here — it is discovered dynamically during /rival:rival-plan when the user specifies which repo they want to work in
+- The wiki/ directory is indexed as a knowledge source, not a code repo
+- Do not create any framework selection quiz — frameworks are reference docs loaded on-demand by the plan agent
 - Do not check for Serena availability — agents handle this themselves now
+- If detection fails for any field, set it to `null` — do not block init on missing data

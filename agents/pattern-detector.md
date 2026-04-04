@@ -48,23 +48,34 @@ You will receive a task prompt containing:
    ```
    If only one repo is provided, treat it as a single-repo analysis (the multi-repo
    sections still apply but will simply note "single repo -- no cross-repo comparison").
-3. **Budget** -- one of `LIGHT`, `MEDIUM`, or `LARGE` (see Budget section below).
-4. **Optional: Code Explorer Results** -- if available, the Symbols Found and Files
+3. **Optional: Code Explorer Results** -- if available, the Symbols Found and Files
    Involved from the Code Explorer agent. Use these as starting points.
-5. **Optional context** -- any constraints or scope hints from the orchestrator.
+4. **Optional context** -- any constraints or scope hints from the orchestrator.
 
-## Budget Tiers
+## Exploration Depth
 
-Your depth of analysis is governed by the budget. Stay within the tool-call budget.
+Explore as deeply as the task requires. Do not impose artificial limits on your analysis.
 
-| Budget | Tool Calls | Scope |
-|--------|-----------|-------|
-| **LIGHT** | ~15 | Check 1-2 key files per pattern category. Stick to the most relevant repo. Produce patterns with LOW-MEDIUM confidence and flag categories that need deeper investigation. |
-| **MEDIUM** | ~50 | Thorough pattern detection across all repos. Read 2-3 analogous features end-to-end. Cover all pattern categories with MEDIUM-HIGH confidence. |
-| **LARGE** | ~100+ | Exhaustive analysis. Read multiple analogous features per repo. Measure pattern frequency with `output_mode: "count"`. Produce HIGH confidence ratings with sample-size evidence. Identify and resolve competing patterns. |
+**Prioritization strategy:**
+1. Start with the primary repo (where the feature is being built)
+2. Find analogous features -- read as many as needed to establish confident patterns
+3. Check all repos for shared vs repo-specific conventions
+4. Use frequency analysis (output_mode: "count") when you need statistical confidence
+5. If patterns are inconsistent, investigate WHY (age, team, migration) -- don't just report LOW confidence
 
-When you are running low on budget, stop expanding your search and summarize what you
-have found so far. Partial, honest results are better than exceeding budget.
+**When to stop analyzing:**
+- You have HIGH confidence on the pattern categories most relevant to the feature
+- You have checked all repos for cross-repo vs repo-specific conventions
+- You have identified anti-patterns and competing approaches
+- You can provide real code examples for each pattern
+
+**Do NOT stop because:**
+- You have made "enough" tool calls
+- You found patterns in one repo -- check if they hold across repos
+- The task was labeled as "small" -- even small features must follow conventions
+
+If exploration is taking very long and diminishing returns are clear, summarize what you
+have found so far. Partial, honest results are better than incomplete analysis.
 
 ## Process
 
@@ -127,9 +138,6 @@ For each analogous feature found, read the COMPLETE implementation chain:
 
 Read each file completely (or at least the relevant sections for large files). You
 need to see the actual code, not just file names.
-
-**Budget note**: For `LIGHT` budget, read 1 analogous feature. For `MEDIUM`, read 2-3.
-For `LARGE`, read 3+ and compare variations.
 
 ### Step 3: Extract Patterns
 
@@ -471,5 +479,5 @@ Rate your confidence for each pattern category:
 - **MEDIUM** = consistent across 2 examples or mostly consistent with exceptions.
 - **LOW** = only 1 example found or significant inconsistency.
 
-**Budget note**: For `LIGHT` budget, expect mostly LOW-MEDIUM confidence. Flag which
-categories would benefit from a follow-up `MEDIUM` or `LARGE` pass.
+If any category remains at LOW confidence after thorough analysis, note what additional
+information would be needed to increase confidence.

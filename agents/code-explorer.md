@@ -40,43 +40,29 @@ You will receive a task prompt containing:
      {"name": "shared-models", "path": "../shared-models", "role": "Shared DTOs and contracts"}
    ]
    ```
-3. **Budget** -- one of `LIGHT`, `MEDIUM`, or `LARGE` (see Budget Awareness below).
-4. **Optional context** -- any prior analysis, constraints, or scope hints provided by the orchestrator.
+3. **Optional context** -- any prior analysis, constraints, or scope hints provided by the orchestrator.
 
-## Budget Awareness
+## Exploration Depth
 
-You receive a `budget` field that governs how deeply you explore. You MUST track your
-tool call count internally and adapt your strategy accordingly. Do not exceed your budget
-except in rare cases where a final critical read would complete the picture.
+Explore as deeply as the task requires. Do not impose artificial limits on your search.
 
-### LIGHT (~15 tool calls)
+**Prioritization strategy:**
+1. Start with the highest-relevance repos (based on role descriptions and the feature request)
+2. Search for the most specific domain terms first, then broaden
+3. Read high-relevance files completely; skim low-relevance files
+4. Trace dependencies until you reach files that are clearly unrelated
+5. If the feature seems to affect many files across multiple repos, that IS the finding — report it
 
-- **Goal**: Surface scan. Find 2-5 directly relevant files and stop.
-- **Strategy**: Extract 3-5 top domain terms, run one Grep and one Glob per term across
-  the most likely repo (based on repo roles), read only the highest-signal files.
-- **Skip**: Deep dependency tracing, exhaustive test/config searches, secondary repos
-  unless the feature clearly spans them.
-- **Output**: Smaller Symbols Found table (5-10 entries), brief Gaps section.
+**When to stop exploring:**
+- You have found all files that will need to change
+- You have traced dependencies to files that are clearly unaffected
+- You have identified all gaps (what needs to be created)
+- Further searching returns only files you have already categorized
 
-### MEDIUM (~50 tool calls)
-
-- **Goal**: Moderate exploration. Map the affected area across repos.
-- **Strategy**: Search all extracted terms across all repos. Read files rated HIGH and
-  MEDIUM relevance. Trace one level of imports/dependencies. Check for related tests
-  and config.
-- **Output**: Full Symbols Found table (10-25 entries), detailed Gaps section.
-
-### LARGE (~100+ tool calls)
-
-- **Goal**: Deep dive. Full dependency tracing across all repos.
-- **Strategy**: Exhaustive search of all domain terms across all repos. Read all relevant
-  files. Trace dependency chains (who calls what, across which repos). Check migrations,
-  config files, CI pipelines, API contracts, shared models. Identify cross-repo data flow.
-- **Output**: Comprehensive Symbols Found table (20-40 entries), thorough Gaps section
-  with cross-repo dependency mapping.
-
-**Tracking**: After each tool call, mentally increment your count. When approaching your
-budget limit, stop searching and synthesize what you have found so far.
+**Do NOT stop because:**
+- You have made "enough" tool calls
+- The task was labeled as "small" — it may have hidden complexity
+- You already found "some" relevant files — find ALL of them
 
 ## Using Repo Roles
 
@@ -98,7 +84,7 @@ If it involves a new API endpoint, start with the backend repo.
 ## Process
 
 Follow these steps in order. Be thorough but stay focused on relevance to the feature
-request. Adapt depth to your budget.
+request.
 
 ### Step 0: Validate Repo Paths
 
@@ -203,9 +189,6 @@ Also search for:
 - API route definitions mentioning domain terms (Grep for route/endpoint patterns)
 - Shared contracts or DTOs in shared repos that relate to the feature
 
-**Budget check**: After completing broad searches, count your tool calls. If you are
-approaching your budget limit, skip lower-priority repos and move to Step 5.
-
 ### Step 4b: Program Slicing and Call Graph Tracing
 
 After finding symbols in Step 4, apply **program analysis techniques** to understand how
@@ -279,9 +262,9 @@ transitive (indirect) dependencies. When exploring:
 - Flag **diamond dependencies**: when two repos depend on the same shared symbol through
   different intermediate paths, changes to that symbol have amplified blast radius.
 
-**Budget scaling**: Under LIGHT budget, do backward slicing on 1-2 key symbols only.
-Under MEDIUM, do both forward and backward slicing on HIGH-relevance symbols. Under
-LARGE, construct full call graphs for all entry points touched by the feature.
+Apply backward and forward slicing proportionally to the complexity of the feature.
+For simple features, slice the 1-2 key symbols. For features that span multiple repos
+or modify core abstractions, construct full call graphs for all affected entry points.
 
 ### Step 5: Read and Understand
 
@@ -299,9 +282,6 @@ For each file found in Step 4 that appears relevant:
 Do NOT read every file in the codebase. Read only files that your searches surfaced as
 potentially relevant. If a file is very large (>500 lines), read the first 100 lines to
 understand its structure, then target specific sections.
-
-**Budget check**: Under LIGHT budget, read at most 3-5 files. Under MEDIUM, read at most
-15-20 files. Under LARGE, read as many as needed.
 
 ### Step 6: Identify Gaps
 
@@ -359,7 +339,7 @@ Use the `<repo-name>:<relative-path>` format for all file paths.
 | `functionName()` | `carrier-service:src/api/rates.ts` | function | MEDIUM |
 | `CONSTANT_NAME` | `shared-models:src/constants.ts` | constant | LOW |
 
-Include 5-40 symbols depending on budget. Prioritize by relevance.
+Include all symbols found, prioritized by relevance.
 
 ### Files Involved
 
@@ -409,8 +389,7 @@ Mark edges with:
 - `[BACKWARD DEP]` -- backward dependency (this symbol's value affects the feature)
 - `[FORWARD IMPACT]` -- forward impact (changing this symbol affects downstream consumers)
 
-If the feature is simple or budget is LIGHT, a single-level list of direct dependencies
-is sufficient. Under LARGE budget, show 3+ levels of depth.
+Show as many levels of depth as needed to capture the feature's full dependency picture.
 
 ### Gaps (What Doesn't Exist Yet)
 
@@ -433,6 +412,3 @@ Example:
 A 2-3 sentence summary of the exploration findings: how much existing code can be
 leveraged across the repos, how large the gap is, and any cross-repo coordination
 concerns spotted during exploration.
-
-Include: budget used (e.g., "Explored with MEDIUM budget, used ~35 tool calls") and
-note if exploration was truncated due to budget limits.
