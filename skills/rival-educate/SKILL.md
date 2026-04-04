@@ -39,7 +39,7 @@ Parse `$ARGUMENTS` for a question or topic:
 - If arguments contain a question mark or look like a question → **Q&A Mode**
   - Examples: "what is IDOR?", "why did we reject eager row creation?", "explain the blast radius"
 - If arguments contain a topic keyword → **Topic Mode**
-  - Examples: "security", "architecture", "review", "patterns"
+  - Examples: "security", "architecture", "review", "patterns", "research", "lessons"
 - If arguments are empty or just a workstream name → **Full Walkthrough Mode**
 
 ## Phase 2: Load Artifacts
@@ -48,14 +48,11 @@ Read whatever exists in the workstream directory. The skill works at ANY phase �
 
 Check for and read (if they exist):
 - `.rival/workstreams/<id>/state.json` — current phase
-- `.rival/workstreams/<id>/context-briefing.md` — agent findings
-- `.rival/workstreams/<id>/plan.md` — implementation plan
-- `.rival/workstreams/<id>/review.md` — adversarial review
-- `.rival/workstreams/<id>/review-decisions.md` — accepted/rejected decisions
-- `.rival/workstreams/<id>/blueprint.md` — task breakdown
-- `.rival/workstreams/<id>/tasks/*.md` — individual task cards
-- `.rival/workstreams/<id>/adrs/*.md` — architecture decision records
+- `.rival/workstreams/<id>/plan.md` — the self-contained plan (includes research findings, review notes, and full task breakdown)
 - `.rival/workstreams/<id>/build-log.md` — build progress
+- `.rival/workstreams/<id>/verification.md` — verification results
+- `.rival/knowledge/codebase-patterns.md` — persistent patterns learned across workstreams
+- `.rival/knowledge/lessons-learned.md` — persistent lessons learned from past workstreams
 
 Note which artifacts exist — this tells you how far along the workstream is.
 
@@ -94,13 +91,13 @@ email dispatch points.">
 ```
 
 **Section 2: What the Agents Found**
-(Only if context-briefing.md exists)
+(Only if plan.md exists — research findings and codebase analysis are integrated into the plan)
 
 ```markdown
 ## What We Learned About the Codebase
 
 ### Relevant Code
-<Summarize the Code Explorer findings. List the specific files
+<Summarize the findings from plan.md. List the specific files
 and modules involved, what they do, and how they relate to
 this feature.
 Example: "9 existing email dispatch points across invitations,
@@ -108,8 +105,9 @@ api_keys, and features apps. None currently check user preferences
 before sending. These are the files we'll need to retrofit.">
 
 ### Architecture
-<Summarize the architecture findings. State which modules are
-affected, how they connect, and where the new code fits in.>
+<Summarize the architecture findings from plan.md. State which
+modules are affected, how they connect, and where the new code
+fits in.>
 
 ### Patterns
 <List the codebase conventions with actual code examples.
@@ -165,7 +163,7 @@ send regardless of user preferences.">
 ```
 
 **Section 4: The Review**
-(Only if review.md and review-decisions.md exist)
+(Only if plan.md contains a "## Review Notes" section)
 
 ```markdown
 ## What the Reviewer Found
@@ -246,15 +244,17 @@ User specified a topic. Generate a focused explanation for just that topic:
 |---------------|----------------|
 | `security` | All security findings, risks, mitigations — explained simply |
 | `architecture` | C4 findings, how the system is structured, where our feature fits |
-| `review` | What the reviewer found and why, accepted/rejected decisions |
+| `review` | What the reviewer found and why, accepted/rejected decisions from the Review Notes in plan.md |
 | `patterns` | Codebase conventions with code examples and explanations |
 | `domain` | DDD concepts, bounded contexts, aggregates — tied to this project |
 | `events` | Event flows, what triggers what, async processing |
 | `tests` | Test strategy, what needs testing and why, types of tests |
 | `risks` | All identified risks with plain-English explanations |
 | `plan` | The implementation plan walkthrough |
-| `decisions` | ADRs and review decisions, trade-offs explained |
+| `decisions` | Review decisions and trade-offs explained from the Review Notes in plan.md |
 | `progress` | Build progress, what's done, what's next |
+| `research` | What industry best practices were found and how they influenced the plan |
+| `lessons` | What was learned from past workstreams via .rival/knowledge/ |
 
 ### Mode C: Q&A Mode
 

@@ -1,13 +1,13 @@
 ---
 name: rival-verify
-description: Get adversarial verification of built code from Gemini CLI (or Claude fallback).
+description: Adversarial code verification with Codex CLI or Claude skeptical-reviewer fallback.
 user-invocable: true
 argument-hint: [workstream-name]
 ---
 
-# Rival Verify — Adversarial Code Verification Orchestrator
+# Rival Verify v1.0 — Adversarial Code Verification Orchestrator
 
-You are the Rival verification orchestrator. Your job is to get an independent adversarial review of the BUILT CODE (not the plan) — either from Gemini CLI or the skeptical reviewer fallback. This mirrors the review phase but focuses on actual implementation. You run inline in the current conversation.
+You are the Rival verification orchestrator. Your job is to get an independent adversarial review of the BUILT CODE from Codex CLI (primary) or the Claude skeptical-reviewer fallback. The plan IS the spec. You run inline in the current conversation.
 
 ## Phase 1: State Validation
 
@@ -34,168 +34,106 @@ Update state to `verifying`.
 
 Collect everything the verifier needs:
 
-1. **Context briefing:** `.rival/workstreams/<id>/context-briefing.md`
-2. **Blueprint:** `.rival/workstreams/<id>/blueprint.md`
-3. **Review decisions:** `.rival/workstreams/<id>/review-decisions.md`
-4. **Git diff:** Run `git diff` to capture all code changes since the workstream started
-5. **Test results:** Run the test suite and capture output
-6. **Coverage:** Run coverage report if available
+1. **Plan:** `.rival/workstreams/<id>/plan.md` — this is the spec, the single source of truth for what was supposed to be built
+2. **Git diff:** All code changes since the workstream started
+3. **Test results:** Run the test suite and capture output
 
 ```bash
-# Get git diff (from first workstream commit)
-git log --oneline --all | head -20
-# Identify the first commit of this workstream and diff from there
-git diff <base-commit>..HEAD
+# Get the first workstream commit
+FIRST_COMMIT=$(git log --oneline --all --grep="<workstream-id>" --reverse | head -1 | awk '{print $1}')
 
-# Run tests
-<test command based on config>
+# Full diff of all workstream changes
+git diff ${FIRST_COMMIT}~1..HEAD
 
-# Coverage (if available)
-<coverage command based on config>
+# Run tests (command from plan.md or config)
+<test command from plan or config>
 ```
+
+**Auto-suggestion for LARGE workstreams:** If the git diff exceeds 2000 lines or touches more than 20 files, warn the user:
+> "This is a large workstream. Verification will take longer and may benefit from being split. Proceeding anyway."
 
 ## Phase 3: Build Verification Prompt
 
 Assemble the verification prompt:
 
 ```markdown
-# Rival Verification Assignment
+You are performing adversarial code verification.
 
-## Your Role
-You are a skeptical senior engineer performing a CODE REVIEW of a completed implementation. You have the blueprint (what was supposed to be built), the actual code changes, and full codebase access. Your job is to verify that what was planned is what was built — and that it was built well.
+## Implementation Plan (what was supposed to be built):
+$(cat .rival/workstreams/<id>/plan.md)
 
-You have NOT been involved in the planning or building process. You are seeing this code for the first time. Be thorough.
+## Actual Code Changes:
+$(git diff <first-workstream-commit>~1..HEAD)
 
-## What You Received
+## Test Results:
+$(<test command from plan>)
 
-### Context Briefing (Original Spec)
-<content of context-briefing.md>
+## Your Task:
+1. Read the actual source files, not just the diff
+2. Verify each task was implemented correctly
+3. Check for security issues not in the plan
+4. Check test quality — are tests meaningful?
+5. Check for regressions in existing functionality
 
-### Blueprint (What Was Supposed to Be Built)
-<content of blueprint.md>
-
-### Review Items That Were Accepted
-<accepted items from review-decisions.md>
-
-### Code Changes (Git Diff)
-<git diff output>
-
-### Test Results
-<test output>
-
-### Coverage Report
-<coverage output, if available>
-
-## Your Process
-1. Read the blueprint to understand what was supposed to be built
-2. Read the code diff to see what was actually built
-3. **Go explore the actual source files** — don't just read the diff
-4. For each blueprint task, verify it was implemented correctly
-5. Check that every accepted review item was actually addressed
-6. Look for issues the blueprint didn't anticipate
-
-## Verification Dimensions
-1. **Spec Compliance** — Does the code match the blueprint? Any tasks incomplete?
-2. **Code Quality** — Clean code, proper error handling, no obvious bugs?
-3. **Security** — Injection vulnerabilities, auth bypasses, secrets in code?
-4. **Test Coverage** — Are tests meaningful? Missing edge cases?
-5. **Review Follow-Through** — Were accepted review items actually implemented?
-6. **Stack-Specific** — <inject stack-specific criteria>
-
-### Stack-Specific Verification Criteria
-
-**TypeScript/Node:** Check for type safety (no `any` leaks), proper async/await error handling, N+1 queries in new ORM calls, proper middleware error propagation.
-
-**C#/.NET:** Check for DI lifetime correctness, disposed DbContext access, async/await throughout (no .Result or .Wait()), proper nullable handling.
-
-**Python/Django:** Check for migration safety, proper queryset usage (no N+1), CSRF protection on new views, proper form validation.
-
-**Go:** Check for goroutine leaks, context propagation, error wrapping consistency, race conditions in new concurrent code.
-
-## Output Format
-
-### Verdict
-PASS | PASS WITH NOTES | NEEDS FIXES | FAIL
-
-### Blueprint Task Verification
-For each task: [x] verified or [ ] issue found
-<with notes on what was checked>
-
-### Review Follow-Through
-For each accepted review item: [x] implemented or [ ] not addressed
-<with evidence>
-
-### Issues Found
-For each issue:
-#### <SEVERITY>: <Issue Title>
-<Description>
-**Evidence:** <file:line reference>
-**Suggestion:** <fix>
-
-### Security Check
-PASS | CONCERNS
-<details>
-
-### Test Coverage Assessment
-<coverage %, assessment of test quality>
-
-### Backward Compatibility
-CONFIRMED | CONCERNS
-<details>
+## Output:
+### Verdict: PASS | PASS WITH NOTES | NEEDS FIXES | FAIL
+### Task Verification: (for each task: verified or issue)
+### Issues Found: (severity, description, file:line, suggestion)
+### Security Check: PASS or CONCERNS with details
 ```
 
-Write to `.rival/workstreams/<id>/gemini-verify-prompt.md`.
+Write the assembled prompt to `.rival/workstreams/<id>/codex-verify-prompt.md`.
 
 ## Phase 4: Execute Verification
 
-### Path A: Gemini Available
+### Path A: Codex Available
+
+Check if `codex` is on PATH.
 
 ```bash
-gemini --model gemini-3-pro-preview \
-  -p "$(cat .rival/workstreams/<id>/gemini-verify-prompt.md)" \
-  --include-directories . \
-  --yolo \
-  --output-format json \
-  > .rival/workstreams/<id>/verification-raw.json
+codex exec "$(cat .rival/workstreams/<id>/codex-verify-prompt.md)" --full-auto -o .rival/workstreams/<id>/verification.md
 ```
 
-Add `--allowed-mcp-server-names serena` if Serena is available.
+Do NOT set a timeout. Let Codex run as long as it needs. Codex will explore the codebase, read source files, and produce its verdict.
 
-Parse JSON response, extract `.response` field, write to `.rival/workstreams/<id>/verification.md`.
+### Path B: Codex Unavailable
 
-### Path B: Fallback
+If `codex` is not found on PATH, fall back immediately. Warn the user:
 
-Warn user about single-model mode. Spawn skeptical reviewer:
+> "Codex CLI not available. Falling back to Claude skeptical-reviewer (single-model mode)."
+
+Spawn the skeptical reviewer:
 
 ```
 Task(
   subagent_type="rival:skeptical-reviewer",
   description="Code Verification: <feature name>",
-  prompt=<verification prompt>
+  prompt=<verification prompt from codex-verify-prompt.md>
 )
 ```
 
 Write result to `.rival/workstreams/<id>/verification.md`.
 
+### Path C: Codex Fails or Crashes
+
+If the `codex exec` command exits with a non-zero status or produces no output, fall back to Path B. Warn the user:
+
+> "Codex crashed or failed (exit code: <code>). Falling back to Claude skeptical-reviewer."
+
+Then proceed exactly as Path B.
+
 ## Phase 5: Human Gate (Final)
 
-Update state to `verification-ready`.
-
-Present verification results:
+Read `.rival/workstreams/<id>/verification.md` and present results:
 
 > "**Verification complete.**
 >
-> Reviewer: <Gemini CLI / Claude Skeptical Reviewer>
+> Reviewer: <Codex CLI / Claude Skeptical Reviewer>
 > Verdict: **<verdict>**
 >
-> **Blueprint tasks: <N>/<N> verified**
-> **Review items: <N>/<N> confirmed addressed**
+> **Tasks: <N>/<N> verified**
+> **Issues found: <N>** <one-line summary of each with severity, if any>
 > **Security: <PASS/CONCERNS>**
-> **Test coverage: <assessment>**
->
-> <If issues found:>
-> **Issues: <N>**
-> <one-line summary of each with severity>
 >
 > Full verification: `.rival/workstreams/<id>/verification.md`
 >
@@ -204,16 +142,19 @@ Present verification results:
 > 2. **Fix issues** — address the findings and re-verify
 > 3. **Accept as-is** — acknowledge issues but ship anyway"
 
-On **Ship it** or **Accept as-is**: Update state to `archived`.
+On **Ship it** or **Accept as-is**:
+- Update state to `archived`
+- Print:
 > "Workstream **<id>** archived. All artifacts preserved in `.rival/workstreams/<id>/`.
-> Great work! The full planning-review-build-verify cycle is complete."
+> Great work! Consider running `/rival:retro` to capture learnings."
 
 On **Fix issues**: Keep state at `build-complete`, user fixes and re-runs `/rival:rival-verify`.
 
 ## Important Notes
 
 - This reviews CODE, not the plan — focus on what was actually built
+- The plan.md is the spec — it defines what "correct" means
 - The git diff should capture all changes from the workstream, not just the last commit
-- Stack-specific criteria should catch real issues, not theoretical ones
-- If Gemini's verification is clearly wrong (hallucinated files, etc.), note it to the user
+- Do NOT set a timeout on Codex — let it run to completion
+- If Codex's verification is clearly wrong (hallucinated files, etc.), note it to the user
 - Archiving preserves all artifacts — workstreams are a permanent record

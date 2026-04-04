@@ -24,7 +24,7 @@ Use Glob to find all workstream state files:
 
 If no workstreams found:
 > "No workstreams found. Start planning a feature with:
-> `/rival:rival-plan <describe your feature>`"
+> `/rival:plan <describe your feature>`"
 
 ### Step 3: Read All State Files
 
@@ -55,24 +55,18 @@ Display as a table:
 For each active workstream, show a progress bar:
 
 ```
-oauth2-auth-20260214: ██░░░░░░░░ plan-approved (2/10)
-user-avatars-20260214: ██████░░░░ building (6/10)
+oauth2-auth-20260214: ████░░░░ plan-approved (4/8)
+user-avatars-20260214: ██████░░ building (6/8)
 ```
 
 Phase progress mapping:
-- `planning` → 1/10
-- `plan-ready` → 2/10
-- `plan-approved` → 2/10
-- `reviewing` → 3/10
-- `review-ready` → 4/10
-- `review-approved` → 5/10
-- `blueprinting` → 6/10
-- `blueprint-ready` → 7/10
-- `blueprint-approved` → 7/10
-- `building` → 8/10
-- `build-complete` → 9/10
-- `verifying` → 9/10
-- `verification-ready` → 10/10
+- `planning` → 2/8
+- `plan-ready` → 3/8
+- `plan-approved` → 4/8
+- `building` → 6/8
+- `build-complete` → 7/8
+- `verifying` → 7/8
+- `archived` → 8/8
 
 #### Archived Workstreams
 
@@ -96,6 +90,17 @@ Phase progress mapping:
 - **Serena:** ✗ Not available
 ```
 
+After the project config summary, read `.rival/knowledge/*.md` files and display a knowledge status line:
+
+```
+Knowledge: Last retro: <date> (<N> patterns, <N> lessons)
+```
+
+Read `.rival/knowledge/*.md` to get this info. If no knowledge files exist, show:
+```
+Knowledge: No retros recorded yet.
+```
+
 ### Step 6: Suggest Next Steps
 
 For each active workstream, suggest the next command based on its phase:
@@ -103,20 +108,17 @@ For each active workstream, suggest the next command based on its phase:
 ```
 ## Next Steps
 
-- **oauth2-auth-20260214** → `/rival:rival-review` (plan is approved, ready for review)
-- **user-avatars-20260214** → Building in progress. Continue with `/rival:rival-build`
+- **oauth2-auth-20260214** → `/rival:execute` (plan is approved, ready for execution)
+- **user-avatars-20260214** → Building in progress
 ```
 
 Phase-to-next-command mapping:
-- `planning`, `plan-ready` → "Complete planning with `/rival:rival-plan`"
-- `plan-approved` → "`/rival:rival-review`"
-- `reviewing`, `review-ready` → "Complete review with `/rival:rival-review`"
-- `review-approved` → "`/rival:rival-execute` (parallel, recommended) or `/rival:rival-blueprint` (classic path)"
-- `blueprinting`, `blueprint-ready` → "Complete blueprint with `/rival:rival-blueprint`"
-- `blueprint-approved` → "`/rival:rival-build` (sequential) or `/rival:rival-execute` (parallel with Agent Teams)"
-- `building` → "Continue building with `/rival:rival-build` or `/rival:rival-execute`"
-- `build-complete` → "`/rival:rival-verify`"
-- `verifying`, `verification-ready` → "Complete verification with `/rival:rival-verify`"
+- `planning`, `plan-ready` → "`/rival:plan`"
+- `plan-approved` → "`/rival:execute`"
+- `building` → "Building in progress"
+- `build-complete` → "`/rival:verify`"
+- `verifying` → "Verification in progress"
+- `archived` → "`/rival:retro` (if knowledge not updated yet)"
 
 ## Important Notes
 
