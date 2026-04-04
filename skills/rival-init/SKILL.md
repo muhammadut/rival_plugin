@@ -1,25 +1,39 @@
 ---
 name: rival-init
-description: Initialize Rival by indexing all available repos, detecting stacks, configuring expert domains, and review tools.
+description: Initialize Rival by connecting to Azure DevOps, pulling all repos and wikis, indexing stacks, configuring expert domains, and review tools.
 user-invocable: true
 ---
 
-# Rival Init v1.0 — Workspace Indexing
+# Rival Init v1.0 — Azure DevOps Onboarding & Workspace Indexing
 
-You are the Rival initialization orchestrator. Your job is to index every repo in the current workspace directory, detect each repo's tech stack, identify expert domains across the entire codebase, check for review tools, and write a complete config.
+You are the Rival initialization orchestrator. Your job is to:
+1. **Discover the plugin** — find the export script, detect OS, check Python
+2. **Connect to Azure DevOps** — help the user set up their PAT and pull all repos + wikis
+3. **Index every repo** in the workspace, detect tech stacks, identify expert domains
+4. **Check for review tools** and write a complete config with all discovered paths
 
-The expected directory layout is a parent directory containing all repos:
+The expected flow is: user opens Claude Code in their main working directory, runs `/rival:rival-init`, and Rival handles everything — from discovering its own tools, to downloading all Azure DevOps content, to indexing it.
+
+**CRITICAL FLOW RULE: Azure DevOps pull (Step 3) MUST run BEFORE repo scanning (Step 5). Never scan for repos or report "no repos found" until AFTER the user has been offered the chance to pull from Azure DevOps. On an empty directory, the first thing the user sees should be the Azure DevOps connection prompt — NOT an error about missing repos.**
+
+The resulting directory layout after init:
 
 ```
-D:\azure-devops\          <- Claude Code opens HERE
-  .env                    <- PAT + Azure DevOps config (optional)
-  carrier-service\
-  quotation-api\
-  shared-models\
-  rpm-gateway\
-  billing-service\
-  ... (could be 100 repos)
-  wiki\                   <- downloaded wiki content
+C:\rival_home\                    <- Claude Code opens HERE (could be empty at start)
+  .env                            <- PAT + Azure DevOps config (auto-generated)
+  knowledge/                      <- Auto-created by the export script
+    repos/                        <- All Azure DevOps repos cloned here
+      Rival.Apps.API/
+      Rival.Customer.API/
+      Rival.CentralSchema.API/
+      ... (could be 100+ repos)
+    wikis/                        <- All wiki content exported here
+      Rival-Insurance-Technology.wiki/
+    summary.json                  <- Index of everything downloaded
+  .rival/
+    config.json                   <- Rival configuration (includes all paths)
+    workstreams/
+    knowledge/
 ```
 
 Init indexes everything. It does NOT ask which repo to work on — that is rival-plan's job. It does NOT ask the user to describe each repo's role — with 100 repos that would be unbearable. Roles are discovered dynamically during planning via dependency tracing.
@@ -28,46 +42,261 @@ Do NOT use AskUserQuestion — just ask questions via normal text output and wai
 
 ## Process
 
-### Step 1: Check Existing Configuration
+The steps below MUST be executed IN ORDER. Do NOT skip ahead to repo scanning. Do NOT report "no repos found" before the Azure DevOps pull has been offered.
+
+### Step 1: Discover Plugin & Environment
+
+Before doing anything else, the init skill must discover where its own tools are and what platform it's running on. This step runs silently — no user interaction needed.
+
+**1a. Find the plugin root directory:**
+
+This SKILL.md file is located inside the plugin at `skills/rival-init/SKILL.md`. The plugin root is two directories up from this file. Use this to derive the absolute path to the plugin:
+
+```
+plugin_root = (directory containing this SKILL.md) / ../../
+```
+
+Concretely, find the plugin root by searching for the export script:
+
+**Use Glob to search for `**/rival_plugin/scripts/export-ado-knowledge.py`** — this finds it regardless of where the plugin is installed. If Glob returns multiple results, prefer the one that matches the path of this SKILL.md file.
+
+If the script cannot be found, warn the user:
+> "Could not find the Rival export script. Azure DevOps integration will not be available. Make sure the Rival plugin is installed correctly."
+
+**1b. Detect the platform:**
+
+```bash
+uname -s 2>/dev/null || echo Windows
+```
+
+- `Darwin` → macOS
+- `Linux` → Linux
+- `MINGW*`, `MSYS*`, `CYGWIN*`, or failure → Windows
+
+Store as `platform` in config (`macos`, `linux`, or `windows`).
+
+**1c. Find the Python command:**
+
+The export script requires Python 3. Different platforms have different commands:
+
+```bash
+# Try python3 first (Mac/Linux standard)
+python3 --version 2>/dev/null
+
+# Fall back to python (Windows standard, some Linux)
+python --version 2>/dev/null
+```
+
+Use whichever succeeds and reports Python 3.x. Store the working command (e.g., `python3` or `python`).
+
+If neither works:
+> "Python 3 is required for Azure DevOps integration but was not found.
+>   - macOS: `brew install python3` or download from python.org
+>   - Windows: Download from python.org (make sure to check 'Add to PATH')
+>   - Linux: `sudo apt install python3` or `sudo yum install python3`
+>
+> Skip Azure DevOps setup for now? You can re-run /rival:rival-init after installing Python."
+
+If the user wants to skip, set `devops` to `null` and jump to Step 5 (which will scan for any repos that might already exist).
+
+**1d. Check for git:**
+
+```bash
+git --version 2>/dev/null
+```
+
+Git is required for cloning repos. If not found, warn and skip DevOps setup.
+
+**Summary of discovered paths (stored in config later):**
+
+```json
+{
+  "paths": {
+    "plugin_root": "/path/to/rival_plugin",
+    "export_script": "/path/to/rival_plugin/scripts/export-ado-knowledge.py",
+    "workspace_root": "C:\\rival_home",
+    "knowledge_dir": "./knowledge",
+    "python_cmd": "python3",
+    "platform": "macos"
+  }
+}
+```
+
+These paths are stored in `.rival/config.json` so that ALL other Rival skills can find the export script, knowledge directory, etc. without re-discovering them every time.
+
+### Step 2: Check Existing Configuration
 
 Read `.rival/config.json` to check if Rival is already configured.
 
-- **If it exists:** Show a summary of the current config (workspace type, repo count, language breakdown, experts, review tool). Then ask:
-  > "Rival is already configured (v{version}). Do you want to:
-  > 1. Keep current configuration
-  > 2. Reconfigure from scratch (re-scans all repos, experts, review tool)
-  > 3. Refresh — keep expert domains, re-scan repo index only"
+- **If config.json exists (re-run scenario):**
+  1. Verify that `paths.export_script` from the stored config still exists on disk. If it doesn't (plugin moved), re-discover it by repeating Step 1a and update the path.
+  2. Show a summary of the current config (workspace type, repo count, language breakdown, experts, review tool).
+  3. Ask:
+     > "Rival is already configured (v{version}). Do you want to:
+     > 1. Keep current configuration
+     > 2. Reconfigure from scratch (re-scans all repos, experts, review tool)
+     > 3. Refresh — keep expert domains, re-scan repo index only
+     > 4. Re-pull from Azure DevOps — update all repos and wikis, then re-scan"
 
   If the user chooses to keep, stop here and show the config summary.
-  If reconfigure or refresh, continue to the appropriate step.
+  If reconfigure, continue from Step 3.
+  If refresh, skip to Step 5.
+  If re-pull, continue from Step 3 (which will detect the existing .env and re-pull).
 
-- **If it doesn't exist:** Continue with full setup from Step 2.
+- **If config.json does NOT exist (first-time setup):** Continue with Step 3. Skip all config validation — there's nothing to validate yet.
 
-### Step 2: Scan for Environment Config
+### Step 3: Azure DevOps Connection & Knowledge Download
 
-Look for `.env`, `.paths.md`, or similar config files in the current directory.
+**THIS STEP IS MANDATORY ON FIRST RUN. Do not skip it. Do not scan for repos first. This is where the repos come from.**
 
-Check for:
-- **Azure DevOps PAT** — env vars like `AZURE_DEVOPS_PAT`, `ADO_PAT`, or entries in `.env`
-- **Azure DevOps organization URL** — e.g., `https://dev.azure.com/myorg`
-- **Azure DevOps project name** — e.g., `RPM-Backend`
-- **GitHub PATs** — `GITHUB_TOKEN`, `GH_TOKEN`
+This is the primary onboarding experience. On a fresh directory, the user has nothing — Rival pulls everything from Azure DevOps.
 
-If found:
-- Store DevOps config for later use (wiki access, board integration, PR creation)
-- Report what was detected: "Found Azure DevOps config: org=myorg, project=RPM-Backend, PAT configured"
+**Check for existing .env:**
 
-If not found:
-- Proceed without DevOps integration
-- Note: "No .env or DevOps config found. Proceeding without DevOps integration. You can add a .env later with ADO_PAT, ADO_ORG, ADO_PROJECT."
+Look for `.env` in the current directory. If found, read it for `ADO_PAT`, `ADO_ORG`, `ADO_PROJECT`.
 
-Do NOT fail or block on missing environment config — it is entirely optional.
+**If .env exists with all three values:**
 
-### Step 3: Index All Repos
+Show what was detected and ask if they want to use it:
 
-Scan the current directory for all subdirectories that look like code repos. Only scan **one level deep** (do not recurse into subdirectories of subdirectories).
+> "Found existing Azure DevOps configuration:
+>   Organization: {ADO_ORG}
+>   Project: {ADO_PROJECT}
+>   PAT: configured ({length} chars)
+>
+> Use this configuration to pull repos and wikis? [Y/n]"
 
-For each immediate subdirectory, check if it contains project markers:
+If yes, proceed to pull. If no, continue to the interactive setup below.
+
+**If .env does NOT exist (or is missing values):**
+
+Guide the user through the setup:
+
+> "Welcome to Rival! Let's connect to Azure DevOps to pull your repos and wiki.
+>
+> Do you have an Azure DevOps Personal Access Token (PAT)?"
+
+**If they don't have a PAT**, show them how to create one:
+
+> "Here's how to create a PAT:
+>
+> 1. Go to: https://dev.azure.com/{org}/_usersSettings/tokens
+>    (or click your profile icon → Personal Access Tokens)
+>
+> 2. Click 'New Token' and configure:
+>    - Name: Rival Plugin
+>    - Scopes: Code (Read), Wiki (Read), Work Items (Read & Write)
+>    - Expiration: Set to maximum allowed
+>
+> 3. Click 'Create' and copy the token immediately.
+>
+> Once you have it, paste it here (or set ADO_PAT environment variable)."
+
+Wait for the user to provide their PAT.
+
+**Once PAT is available**, ask for org and project if not already known:
+
+> "Organization name? (e.g. rivalitinc — the part after dev.azure.com/)"
+
+> "Project name? (e.g. Rival Insurance Technology)"
+
+**Test the connection** by running (use the paths discovered in Step 1):
+
+```bash
+# Use the python_cmd and export_script path from Step 1
+ADO_PAT="$PAT" ADO_ORG="$ORG" ADO_PROJECT="$PROJECT" {python_cmd} {paths.export_script} --test-connection
+```
+
+For example on macOS:
+```bash
+ADO_PAT="xxx" ADO_ORG="rivalitinc" ADO_PROJECT="Rival Insurance Technology" python3 /path/to/rival_plugin/scripts/export-ado-knowledge.py --test-connection
+```
+
+On Windows (PowerShell):
+```powershell
+$env:ADO_PAT="xxx"; $env:ADO_ORG="rivalitinc"; $env:ADO_PROJECT="Rival Insurance Technology"; python "C:\path\to\rival_plugin\scripts\export-ado-knowledge.py" --test-connection
+```
+
+If connection fails, tell the user what went wrong and ask them to check their PAT, org, and project.
+
+**Once connection is verified**, save the .env file using the **Write tool** (NOT bash heredoc — that breaks on Windows and can corrupt PATs with special characters):
+
+Use the Write tool to create `.env` with this content:
+
+```
+# Rival Plugin — Azure DevOps Configuration
+# Generated: {timestamp}
+# DO NOT commit this file to git.
+
+ADO_PAT={pat}
+ADO_ORG={org}
+ADO_PROJECT={project}
+ADO_OUTPUT_DIR=knowledge
+```
+
+The PAT value goes in as-is — no quoting, no escaping. The Write tool handles this safely cross-platform.
+
+Then add `.env` to `.gitignore` — read `.gitignore` first (if it exists), check if `.env` is already listed, and append it if not. Create `.gitignore` with just `.env` if it doesn't exist.
+
+**Then pull everything:**
+
+> "Connection verified! Pulling Azure DevOps content with default settings:
+>   - Cloning all repositories into ./knowledge/repos/
+>   - Exporting all wikis into ./knowledge/wikis/
+>   - Creating summary index at ./knowledge/summary.json
+>
+> This may take a few minutes depending on repo count..."
+
+Run the export (using discovered paths from Step 1):
+
+```bash
+# Mac/Linux:
+ADO_PAT="$PAT" ADO_ORG="$ORG" ADO_PROJECT="$PROJECT" {python_cmd} {paths.export_script} --output-dir ./knowledge
+
+# Windows (PowerShell):
+# $env:ADO_PAT="$PAT"; $env:ADO_ORG="$ORG"; $env:ADO_PROJECT="$PROJECT"; python "{paths.export_script}" --output-dir .\knowledge
+```
+
+Wait for it to complete. When done, report:
+
+> "Azure DevOps pull complete!
+>   Repos: {count} cloned
+>   Wikis: {count} exported
+>   Output: ./knowledge/"
+
+If the knowledge folder already exists (re-pull scenario), the export script will update existing repos (git pull) and re-export wikis.
+
+**If the user wants to skip Azure DevOps setup:**
+
+At any point during the setup prompts, if the user says they don't want Azure DevOps integration (e.g., "skip", "no", "I don't use Azure DevOps"), proceed without it:
+
+> "No problem. Proceeding without Azure DevOps integration. You can run /rival:rival-init later to set it up."
+
+Set `devops` to `null` in the config and continue to Step 4.
+
+### Step 4: Scan for Additional Environment Config
+
+Look for additional config beyond Azure DevOps:
+
+- **GitHub PATs** — `GITHUB_TOKEN`, `GH_TOKEN` env vars or in `.env`
+- **`.paths.md`** — if found, this is a legacy config file from an older Rival version. Ignore it — the new `.env` + `config.json` approach supersedes it. Do NOT parse it.
+
+If GitHub config found, store for later use.
+
+Do NOT fail or block on missing config — Azure DevOps setup (Step 3) is the primary path.
+
+### Step 5: Index All Repos
+
+**This step runs AFTER Step 3.** By now, `./knowledge/repos/` should contain cloned repos (unless the user skipped Azure DevOps setup).
+
+Scan for code repos in the following locations (one level deep each):
+1. **`./knowledge/repos/`** — repos pulled from Azure DevOps (primary source)
+2. **Current directory** — any repos directly in the workspace root (NOT inside knowledge/)
+3. **Any other immediate subdirectories** that look like code repos
+
+Only scan **one level deep** within each location (do not recurse into subdirectories of subdirectories). For example, `./knowledge/repos/Rival.Apps.API/` is scanned because it's one level inside `knowledge/repos/`. But `./knowledge/repos/Rival.Apps.API/src/SubProject/` is NOT scanned.
+
+For each subdirectory, check if it contains project markers:
 
 | File Pattern | Language | Framework Hint |
 |---|---|---|
@@ -89,18 +318,40 @@ For each repo found, detect:
 
 Also identify **non-code directories** — subdirectories that contain no project markers but have content like markdown files, documentation, or wiki content. Index these as **knowledge sources** with their type (wiki, docs, etc.).
 
+Specifically check for:
+- **`./knowledge/wikis/`** — wikis exported from Azure DevOps. Each subfolder is a wiki. Index each as a knowledge source with type "wiki".
+- **`./knowledge/summary.json`** — if present, read it for the authoritative list of repos and wikis that were pulled from Azure DevOps.
+- Any other directories with markdown/documentation content.
+
 Present a summary to the user:
 
 > "Found **N** repos (X C#, Y TypeScript, Z Python) and **M** knowledge sources"
 >
-> Repos: carrier-service (C#), quotation-api (C#), shared-models (C#), rpm-gateway (TypeScript), ...
-> Knowledge: wiki
+> Repos: Rival.Apps.API (C#), Rival.Customer.API (C#), Rival.CentralSchema.API (C#), ...
+> Knowledge: Rival-Insurance-Technology.wiki
 
 Do NOT ask the user to confirm or describe each repo. Just report what was found.
 
-### Step 4: Expert Domain Detection
+**If NO repos are found even after the Azure DevOps pull:**
 
-Scan imports, references, and config files across ALL indexed repos for domain-specific patterns:
+This means either:
+- The pull failed silently (check `./knowledge/repos/` — is it empty?)
+- The user skipped DevOps setup AND the directory has no repos
+
+In this case:
+> "No code repos found after Azure DevOps pull. Check if the pull completed successfully (look for repos in ./knowledge/repos/). You may need to re-run /rival:rival-init."
+
+Do NOT show this error before Step 3 has completed.
+
+### Step 6: Expert Domain Detection
+
+Scan for domain-specific patterns across indexed repos. To keep this fast on large workspaces (100+ repos), use this strategy:
+
+1. **Check project/dependency files first** (fast) — scan `*.csproj`, `package.json`, `requirements.txt`, `go.mod`, `Cargo.toml`, `docker-compose.yml`, `*.tf` files across all repos using Grep. These files reveal most domains without reading source code.
+2. **Spot-check source files only if needed** — if a domain isn't detectable from dependency files (e.g., APIM policy XML), use targeted Grep for specific file patterns (`*.xml` for APIM policies, `appsettings*.json` for connection strings).
+3. **Do NOT read every source file** — that would be too slow for 100+ repos.
+
+Domain detection patterns:
 
 | Pattern | Expert Domain |
 |---|---|
@@ -129,7 +380,7 @@ Present detected domains and ask the user for additions:
 >
 > Add more? (comma-separated, or press Enter to confirm)"
 
-### Step 5: Review Tool Detection
+### Step 7: Review Tool Detection
 
 Check if Codex CLI is installed:
 
@@ -142,9 +393,9 @@ codex --version 2>/dev/null
 
 If Codex is found, try to detect the model version from its output or config. Store as `codex_model`.
 
-Try to detect if an API key is configured:
+Try to detect if an API key is configured (do NOT print the key or any part of it):
 ```bash
-echo $OPENAI_API_KEY | head -c 5 2>/dev/null
+[ -n "$OPENAI_API_KEY" ] && echo "set" || echo "not set"
 ```
 If no key detected, warn the user:
 > "Codex CLI is installed but no API key was detected. Codex review may fail without a key. Set OPENAI_API_KEY to enable."
@@ -156,13 +407,13 @@ Always set `review.fallback = "skeptical-reviewer"`.
 
 Do NOT check for Gemini CLI — it has been replaced by Codex.
 
-### Step 6: Create Directory Structure
+### Step 8: Create Directory Structure
 
 Create the following structure:
 
 ```
 .rival/
-  config.json                         (written in Step 7)
+  config.json                         (written in Step 9)
   workstreams/                        (empty directory for workstream state)
   knowledge/
     codebase-patterns.md              (placeholder)
@@ -185,7 +436,7 @@ Write `lessons-learned.md`:
 > Do not delete — agents reference past lessons to avoid repeating mistakes.
 ```
 
-### Step 7: Write Config
+### Step 9: Write Config
 
 Write `.rival/config.json` with all gathered data. Use the current timestamp for `initialized_at`.
 
@@ -196,18 +447,25 @@ Config format:
   "version": "1.0.0",
   "workspace_type": "multi-repo",
   "workspace_root": ".",
+  "paths": {
+    "plugin_root": "/path/to/rival_plugin",
+    "export_script": "/path/to/rival_plugin/scripts/export-ado-knowledge.py",
+    "knowledge_dir": "./knowledge",
+    "python_cmd": "python3",
+    "platform": "macos"
+  },
   "index": {
     "repos": [
-      {"name": "carrier-service", "path": "./carrier-service", "language": "csharp", "framework": "aspnet-core", "test_framework": "xunit", "orm": "ef-core", "runtime": "dotnet8"},
-      {"name": "quotation-api", "path": "./quotation-api", "language": "csharp", "framework": "aspnet-core", "test_framework": "xunit", "orm": "ef-core", "runtime": "dotnet8"},
-      {"name": "shared-models", "path": "./shared-models", "language": "csharp", "framework": "classlib", "test_framework": null, "orm": null, "runtime": "dotnet8"},
-      {"name": "rpm-gateway", "path": "./rpm-gateway", "language": "typescript", "framework": "express", "test_framework": "jest", "orm": "prisma", "runtime": "node"}
+      {"name": "Rival.Apps.API", "path": "./knowledge/repos/Rival.Apps.API", "language": "csharp", "framework": "aspnet-core", "test_framework": "xunit", "orm": "ef-core", "runtime": "dotnet8"},
+      {"name": "Rival.Customer.API", "path": "./knowledge/repos/Rival.Customer.API", "language": "csharp", "framework": "aspnet-core", "test_framework": "xunit", "orm": "ef-core", "runtime": "dotnet8"},
+      {"name": "Rival.CentralSchema.API", "path": "./knowledge/repos/Rival.CentralSchema.API", "language": "csharp", "framework": "aspnet-core", "test_framework": null, "orm": "ef-core", "runtime": "dotnet8"},
+      {"name": "Rival.External.Web.Referrals", "path": "./knowledge/repos/Rival.External.Web.Referrals", "language": "typescript", "framework": "next", "test_framework": "jest", "orm": null, "runtime": "node"}
     ],
     "knowledge_sources": [
-      {"name": "wiki", "path": "./wiki", "type": "wiki"}
+      {"name": "Rival-Insurance-Technology.wiki", "path": "./knowledge/wikis/Rival-Insurance-Technology.wiki", "type": "wiki"}
     ],
-    "total_repos": 47,
-    "languages": {"csharp": 30, "typescript": 12, "python": 5}
+    "total_repos": 100,
+    "languages": {"csharp": 75, "typescript": 15, "python": 5, "terraform": 5}
   },
   "experts": ["azure", "ef-core", "service-bus", "apim"],
   "review": {
@@ -225,9 +483,29 @@ Config format:
 }
 ```
 
+When the user skips Azure DevOps setup, the `devops` and `paths.knowledge_dir` fields change:
+
+```json
+{
+  "devops": null,
+  "paths": {
+    "plugin_root": "/path/to/rival_plugin",
+    "export_script": "/path/to/rival_plugin/scripts/export-ado-knowledge.py",
+    "knowledge_dir": null,
+    "python_cmd": "python3",
+    "platform": "macos"
+  }
+}
+```
+
 Notes on config values:
 - `workspace_type`: always "multi-repo" in this workflow.
 - `workspace_root`: always "." — the parent directory where Claude Code was launched.
+- `paths.plugin_root`: absolute path to the Rival plugin installation directory.
+- `paths.export_script`: absolute path to `export-ado-knowledge.py`. Other skills use this to run Azure DevOps operations.
+- `paths.knowledge_dir`: relative path to the knowledge directory (repos + wikis). Usually `./knowledge`.
+- `paths.python_cmd`: the Python command that works on this system (`python3` or `python`).
+- `paths.platform`: `macos`, `linux`, or `windows`. Used by skills to construct platform-appropriate commands.
 - `index.repos`: FLAT list of ALL discovered repos. Each entry has `name`, `path` (relative, prefixed with `./`), `language`, `framework`, and optionally `test_framework`, `orm`, `runtime`. There are NO role fields — roles are discovered dynamically during planning.
 - `index.knowledge_sources`: non-code directories like wiki/ or docs/.
 - `index.total_repos`: count of repos in the index (convenience field).
@@ -239,7 +517,7 @@ Notes on config values:
 - `devops`: DevOps integration config. Contains `provider`, `organization`, `project`, and `pat_configured`. Set to `null` if no .env or DevOps config was found.
 - `initialized_at`: ISO 8601 UTC timestamp of when init completed.
 
-### Step 8: Display Summary
+### Step 10: Display Summary
 
 Display a summary box adapted to actual detected values:
 
@@ -247,10 +525,10 @@ Display a summary box adapted to actual detected values:
 +======================================================+
 |              Rival v1.0 Initialized                   |
 +======================================================+
-| Workspace: D:\azure-devops (multi-repo)               |
-| Repos indexed: 47                                     |
-|   C#: 30 | TypeScript: 12 | Python: 5                |
-| Knowledge sources: wiki                               |
+| Workspace: C:\rival_home (multi-repo)                 |
+| Repos indexed: 100                                    |
+|   C#: 75 | TypeScript: 15 | Python: 5 | Terraform: 5|
+| Knowledge sources: Rival-Insurance-Technology.wiki    |
 | Experts: azure, ef-core, service-bus, apim            |
 | Review: Codex CLI (gpt-5.4)                           |
 | DevOps: Azure DevOps (PAT configured)                 |
@@ -276,27 +554,40 @@ Then suggest the next step:
 
 | Situation | Handling |
 |---|---|
-| Directory has no repos | "No code repos found in the current directory. Are you in the right directory? Rival expects to run from a parent directory containing your repos." Stop init. |
+| **Empty directory, no repos, no knowledge/, no .env** | This is the PRIMARY use case. Go through Step 1 → Step 2 → Step 3 (Azure DevOps pull). Do NOT show "no repos found" error. The whole point of init is to pull the repos. |
+| knowledge/ already exists with repos | Ask: "Found existing knowledge/ directory with repos. Re-pull from Azure DevOps, or use what's here?" If use existing, skip to Step 5. |
+| .env exists but no knowledge/ | Connection already configured. Ask to confirm, then pull. |
 | 200+ repos | Still index them all. Show summary counts, do not list every repo individually. |
-| Mixed languages | Expected — report the full breakdown (e.g., "C#: 30, TypeScript: 12, Python: 5"). |
-| No .env or PAT | Proceed without DevOps integration. Set `devops` to `null`. Suggest configuring later. |
-| Re-running init | Offer keep/reconfigure/refresh options (Step 1). Refresh preserves expert domains and re-scans the repo index. |
+| Mixed languages | Expected — report the full breakdown (e.g., "C#: 75, TypeScript: 15, Python: 5"). |
+| No .env or PAT and user skips setup | Proceed without DevOps integration. Set `devops` to `null`. Then scan for any repos that might already be in the directory. If still nothing, suggest configuring later. |
+| PAT connection fails | Show the error, explain common causes (wrong org/project name, PAT expired, wrong scopes). Let user retry. |
+| Export script fails mid-clone | Some repos may have been cloned. Report which failed, continue indexing what was downloaded. |
+| Re-running init | Offer keep/reconfigure/refresh/re-pull options (Step 2). |
 | Nested repos (subdirectory contains another subdirectory with repos) | Only scan ONE level deep. Do not recurse. |
 | Wiki or docs directory | Index as a knowledge source, not a code repo. |
+| knowledge/wikis/ exists | Index each subfolder as a knowledge source with type "wiki". |
 | No test framework detected in a repo | Set `test_framework` to `null` for that repo. Do not ask. |
 | Codex CLI installed but no API key | Warn the user but still set `review.tool` to "codex". |
 | Multiple project markers in one directory (e.g., package.json AND *.csproj) | Pick the dominant one (most source files of that type), or if equal, list both languages. |
-| .rival/ directory already exists but no config.json | Treat as fresh init — proceed from Step 2. |
+| .rival/ directory already exists but no config.json | Treat as fresh init — proceed from Step 3. |
 | Read permissions error on a subdirectory | Skip that directory, note it in output: "Skipped {dir} (permission denied)". |
+| Python 3 not installed | Cannot run the export script. Tell user: "Python 3 is required for Azure DevOps integration. Install it from python.org or skip DevOps setup." |
+| No repos found AFTER Azure DevOps pull completed | Something went wrong with the pull. Check `./knowledge/repos/` contents. Report the issue. |
 
 ## Important Notes
 
 - Do NOT use AskUserQuestion — just ask questions via text output
+- **NEVER show "no repos found" before Step 3 (Azure DevOps pull) has been offered to the user**
 - Auto-detect as much as possible to minimize user input
 - The config file is the single source of truth for all other Rival skills
 - Do NOT check for Gemini CLI — it has been replaced by Codex
 - The role of each repo is NOT defined here — it is discovered dynamically during /rival:rival-plan when the user specifies which repo they want to work in
-- The wiki/ directory is indexed as a knowledge source, not a code repo
+- The knowledge/wikis/ directories are indexed as knowledge sources, not code repos
 - Do not create any framework selection quiz — frameworks are reference docs loaded on-demand by the plan agent
 - Do not check for Serena availability — agents handle this themselves now
 - If detection fails for any field, set it to `null` — do not block init on missing data
+- The Azure DevOps PAT is stored ONLY in .env — never write it to config.json, only store `pat_configured: true`
+- The export script path is relative to the plugin's own directory — find it via the SKILL.md location
+- knowledge/repos/ is the primary source of repos after Azure DevOps pull — index repos there, not in the workspace root
+- If knowledge/summary.json exists, use it as a cross-reference to validate that all expected repos were cloned
+- The flow is: discover tools → check config → PULL FROM DEVOPS → scan what was pulled → detect experts → detect review tools → write config → show summary

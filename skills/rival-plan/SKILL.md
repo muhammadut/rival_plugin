@@ -17,6 +17,8 @@ Read `.rival/config.json`. If it doesn't exist, stop and tell the user:
 > "Rival isn't configured for this project yet. Run `/rival:rival-init` first."
 
 Store the config values — you'll need them throughout:
+- `paths.plugin_root` (absolute path to Rival plugin — needed to find framework docs and agent definitions)
+- `paths.knowledge_dir` (where repos and wikis are stored)
 - `project_type` (brownfield/greenfield)
 - `stack` (language, framework, test_framework, orm, runtime)
 - `index.repos` (array of {name, path, language, framework})
@@ -169,7 +171,7 @@ Override rules:
 ### 2.2 Framework Doc Selection
 
 With 1M context, you (the main agent) can read 2-3 framework docs directly. Decide which are relevant:
-- New entities/domain concepts → read `frameworks/ddd.md` (use `${CLAUDE_PLUGIN_ROOT}/frameworks/ddd.md`)
+- New entities/domain concepts → read `frameworks/ddd.md` (use `{config.paths.plugin_root}/frameworks/ddd.md`)
 - Architectural changes → read `frameworks/c4-model.md`
 - Event flows or async patterns → read `frameworks/event-storming.md`
 - User-facing feature → read `frameworks/bdd.md`
@@ -379,7 +381,7 @@ You now have results from research agents (if MEDIUM/LARGE), code analysis agent
 
 ### 5.1 Read Framework Docs (if selected in triage)
 
-If you haven't already, read the relevant framework reference docs from `${CLAUDE_PLUGIN_ROOT}/frameworks/`. Use their guidance to inform the plan structure.
+If you haven't already, read the relevant framework reference docs from `{config.paths.plugin_root}/frameworks/`. Use their guidance to inform the plan structure.
 
 ### 5.2 Write the Plan Document
 
@@ -641,7 +643,7 @@ On **Reject**: Reset state to `planning`, ask for new direction.
 - You run INLINE — you are Claude in the current conversation. Do NOT fork context.
 - Sub-agents return their results TO YOU. You synthesize everything.
 - The plan document MUST be self-contained. A fresh Claude Code instance with zero context must be able to read plan.md and execute without any other artifacts.
-- Framework file resolution: check `.rival/frameworks/<name>.md` first (project-local custom), then `${CLAUDE_PLUGIN_ROOT}/frameworks/<name>.md` (bundled).
+- Framework file resolution: check `.rival/frameworks/<name>.md` first (project-local custom), then `{config.paths.plugin_root}/frameworks/<name>.md` (bundled).
 - If an agent fails or returns poor results, note it in the plan and proceed.
 - Keep the user informed: "Researching...", "Analyzing codebase...", "Writing plan...", "Auto-reviewing..."
 - Never timeout Codex — let it run as long as it needs.

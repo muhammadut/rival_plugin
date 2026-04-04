@@ -1,247 +1,255 @@
 # Rival DevOps Integration
 
-This document describes how the Rival plugin integrates with Azure DevOps (and optionally GitHub) to enable end-to-end planning, research, and ticket creation workflows.
+This document describes how the Rival plugin integrates with Azure DevOps to enable end-to-end planning, research, and ticket creation workflows.
 
 ---
 
-## 1. `.paths.md` Format -- Full Specification
+## 1. Architecture Overview
 
-The `.paths.md` file is a per-project configuration file that lives in the project root. It stores personal access tokens, organization URLs, repo mappings, wiki endpoints, and board settings so that Rival agents can interact with DevOps services without prompting the user each time.
+Rival uses a two-file configuration approach:
 
-> **Security**: `.paths.md` contains secrets. Never commit it. Always add it to `.gitignore`.
+| File | Purpose | Contains Secrets? | Committed to Git? |
+|------|---------|--------------------|--------------------|
+| `.env` | Azure DevOps PAT, org, project | Yes | **Never** |
+| `.rival/config.json` | All paths, repo index, experts, review tool | No (only `pat_configured: true/false`) | Optional |
 
-### Template
+The old `.paths.md` approach is deprecated. If a `.paths.md` file exists, Rival ignores it.
 
-```markdown
-# .paths.md -- Rival DevOps Configuration
-# DO NOT commit this file. Add to .gitignore.
+### Directory Layout After Setup
 
-## Azure DevOps
-- PAT: <personal-access-token>
-- Organization: https://dev.azure.com/myorg
-- Project: RPM-Backend
-- Repos:
-  - quotation-api: https://dev.azure.com/myorg/RPM/_git/quotation-api
-  - shared-models: https://dev.azure.com/myorg/RPM/_git/shared-models
-
-## Wiki
-- URL: https://dev.azure.com/myorg/RPM/_wiki/wikis/RPM.wiki
-
-## Boards
-- URL: https://dev.azure.com/myorg/RPM/_boards
-- Default area: RPM\Backend
-- Default iteration: Sprint 42
-
-## GitHub (if applicable)
-- PAT: <github-personal-access-token>
-- Repos:
-  - rival-plugin: https://github.com/muhammadut/rival_plugin
+```
+workspace-root/                  (Claude Code opens here)
+  .env                           PAT + Azure DevOps config
+  .gitignore                     Contains .env
+  knowledge/                     Created by export script
+    repos/                       All cloned repositories
+      Rival.Apps.API/
+      Rival.Customer.API/
+      ...
+    wikis/                       Exported wiki content (markdown + assets)
+      Rival-Insurance-Technology.wiki/
+    summary.json                 Index of everything downloaded
+  .rival/
+    config.json                  Rival configuration (includes paths)
+    workstreams/                 Feature workstreams
+    knowledge/
+      codebase-patterns.md       Discovered patterns
+      lessons-learned.md         Past lessons
 ```
 
-### Field Reference
+---
 
-| Section | Field | Required | Description |
-|---------|-------|----------|-------------|
-| Azure DevOps | PAT | Yes | Personal access token with Code (Read/Write), Wiki (Read), and Work Items (Read/Write) scopes |
-| Azure DevOps | Organization | Yes | Full URL to the Azure DevOps organization |
-| Azure DevOps | Project | Yes | Project name within the organization |
-| Azure DevOps | Repos | Yes | Key-value pairs mapping a short name to the full clone URL |
-| Wiki | URL | No | Full URL to the project wiki; enables wiki context during planning |
-| Boards | URL | No | Full URL to the boards hub |
-| Boards | Default area | No | Default area path for new work items (backslash-separated) |
-| Boards | Default iteration | No | Default iteration/sprint for new work items |
-| GitHub | PAT | No | GitHub personal access token (only needed if repos are on GitHub) |
-| GitHub | Repos | No | Key-value pairs for GitHub repos |
+## 2. Setup Flow (handled by `/rival:rival-init`)
 
-### How Rival Reads `.paths.md`
+Users do NOT run scripts manually. The init skill handles everything:
 
-On `/rival:init`, the plugin scans the project root for `.paths.md`. If found, it parses each section and stores the values in the agent's in-memory context. The parser expects:
+1. **Discovers** the plugin installation path and export script
+2. **Prompts** for PAT (with step-by-step creation guide if needed)
+3. **Asks** for organization name and project name
+4. **Tests** the connection (validates both org access AND project access)
+5. **Saves** `.env` with credentials (owner-only permissions, added to `.gitignore`)
+6. **Runs** the export script to clone all repos and export all wikis
+7. **Indexes** everything into `.rival/config.json`
 
-- Sections denoted by `## Heading`
-- Key-value pairs as `- Key: Value`
-- Nested lists (repos) as `  - name: url` (two-space indent)
+### Manual Setup (alternative)
+
+For users who prefer to set up manually or are on Windows without Claude Code:
+
+```bash
+# Mac/Linux:
+export ADO_PAT="your-token-here"
+export ADO_ORG="rivalitinc"
+export ADO_PROJECT="Rival Insurance Technology"
+python3 path/to/rival_plugin/scripts/export-ado-knowledge.py --output-dir ./knowledge
+
+# Windows PowerShell:
+$env:ADO_PAT="your-token-here"
+$env:ADO_ORG="rivalitinc"
+$env:ADO_PROJECT="Rival Insurance Technology"
+python path\to\rival_plugin\scripts\export-ado-knowledge.py --output-dir .\knowledge
+```
+
+Or use the interactive shell wrapper (Mac/Linux only):
+
+```bash
+bash path/to/rival_plugin/scripts/setup-devops.sh
+```
 
 ---
 
-## 2. Repo Cloning
+## 3. PAT Requirements
 
-The setup script (`scripts/setup-devops.sh`) automates cloning all repos listed in `.paths.md`.
+The Personal Access Token needs these scopes:
+
+| Scope | Access | Required? | Used For |
+|-------|--------|-----------|----------|
+| Code | Read | **Yes** | Cloning all repositories |
+| Wiki | Read | **Yes** | Exporting wiki content |
+| Work Items | Read & Write | Optional | Board integration, ticket creation |
+| Build | Read | Optional | Pipeline status checks |
+
+### Creating a PAT
+
+1. Navigate to: `https://dev.azure.com/{org}/_usersSettings/tokens`
+2. Click **New Token**
+3. Set Name: `Rival Plugin`, Expiration: maximum allowed
+4. Select the scopes above
+5. Click **Create** and copy immediately
+
+### Security
+
+- PAT is stored ONLY in `.env` (never in `config.json`)
+- `.env` is created with `chmod 600` (owner-only read/write)
+- `.env` is auto-added to `.gitignore`
+- Git clone operations pass auth via `-c http.extraheader` (not persisted in `.git/config`)
+- Error messages redact auth tokens automatically
+
+---
+
+## 4. Export Script (`scripts/export-ado-knowledge.py`)
+
+Cross-platform Python 3 script that handles all Azure DevOps operations.
+
+### Commands
+
+```bash
+# Test connection (validates org + project access)
+python3 export-ado-knowledge.py --test-connection
+
+# Full export (repos + wikis)
+python3 export-ado-knowledge.py --output-dir ./knowledge
+
+# Repos only
+python3 export-ado-knowledge.py --output-dir ./knowledge --skip-wikis
+
+# Wikis only
+python3 export-ado-knowledge.py --output-dir ./knowledge --skip-repos
+```
+
+### Features
+
+- **Incremental updates**: If repos already exist, does `git fetch + pull` instead of re-cloning
+- **Collision prevention**: If two repo names sanitize to the same directory name, appends `_2`, `_3` etc.
+- **Wiki depth limit**: Protects against circular references (max 50 levels deep)
+- **Graceful failures**: If one repo fails to clone, continues with the rest
+- **PAT safety**: Auth tokens are masked in all error messages and logs
+
+### Output: `summary.json`
+
+The export script creates a `summary.json` that lists everything downloaded:
+
+```json
+{
+  "generatedAt": "2026-04-03T14:30:00Z",
+  "repos": [
+    {"name": "Rival.Apps.API", "id": "...", "path": "repos/Rival.Apps.API", "remoteUrl": "...", "defaultBranch": "refs/heads/main"}
+  ],
+  "wikis": [
+    {"name": "Rival-Insurance-Technology.wiki", "id": "...", "type": "projectWiki", "path": "wikis/Rival-Insurance-Technology.wiki"}
+  ]
+}
+```
+
+Rival init reads this to validate that all expected repos were cloned.
+
+---
+
+## 5. Paths in Config
+
+After init, `.rival/config.json` stores all discovered paths so other skills don't need to re-discover them:
+
+```json
+{
+  "paths": {
+    "plugin_root": "/Users/user/rival_plugin",
+    "export_script": "/Users/user/rival_plugin/scripts/export-ado-knowledge.py",
+    "knowledge_dir": "./knowledge",
+    "python_cmd": "python3",
+    "platform": "macos"
+  }
+}
+```
+
+All Rival skills read `config.paths` to find:
+- The export script (for re-pulling, refreshing)
+- The knowledge directory (for repo/wiki access)
+- The Python command (for running the export script)
+- The platform (for constructing platform-appropriate commands)
+
+---
+
+## 6. Wiki Access
+
+After export, wiki content is available locally as markdown files:
+
+```
+knowledge/wikis/Rival-Insurance-Technology.wiki/
+  manifest.json           Wiki metadata + page tree
+  pages/                  Markdown content, organized by wiki path
+    index.md
+    Architecture/
+      index.md
+    Onboarding/
+      index.md
+  assets/                 Downloaded images and attachments
+  git/                    Git clone of wiki repo (if available)
+```
+
+Rival agents reference wiki content during:
+- **Planning** — architecture decisions, team conventions, domain glossary
+- **Research** — existing documentation, standards
+
+---
+
+## 7. Board Integration (Work Items)
+
+When the PAT has Work Items (Read & Write) scope, Rival can create tickets on Azure DevOps Boards.
 
 ### How It Works
 
-1. The script reads the `Repos` entries from each provider section.
-2. For Azure DevOps repos, it constructs the authenticated clone URL:
-   ```
-   https://<PAT>@dev.azure.com/myorg/RPM/_git/quotation-api
-   ```
-3. For GitHub repos, it uses:
-   ```
-   https://<PAT>@github.com/muhammadut/rival_plugin.git
-   ```
-4. Each repo is cloned into a `./repos/<short-name>/` directory relative to the project root.
-5. If the directory already exists, the script performs a `git pull` instead.
+1. During `/rival:rival-research`, the agent identifies actionable findings
+2. Each finding is formatted as a work item proposal and presented to the user
+3. On approval, the agent calls the Azure DevOps REST API to create the work item
 
-### Directory Layout After Cloning
+### API Details
 
 ```
-project-root/
-  .paths.md
-  repos/
-    quotation-api/
-    shared-models/
-    rival-plugin/
+POST https://dev.azure.com/{org}/{project}/_apis/wit/workitems/$Task?api-version=7.1
+Content-Type: application/json-patch+json
+Authorization: Basic base64(:PAT)
 ```
 
-### Security Considerations
-
-- PATs are embedded in the clone URL only during the git operation. The script does **not** persist authenticated URLs in `.git/config`; it uses `git clone` with the token inline and then removes credentials from the remote config.
-- All cloned repos are added to the project's `.gitignore` under `repos/`.
-
----
-
-## 3. Wiki Access
-
-Rival agents can read Azure DevOps wiki pages to gather organizational context during `/rival:plan` and `/rival:research` workflows.
-
-### How It Works
-
-1. The agent reads the Wiki URL from `.paths.md`.
-2. It calls the Azure DevOps REST API:
-   ```
-   GET https://dev.azure.com/{org}/{project}/_apis/wiki/wikis/{wikiId}/pages?path={pagePath}&api-version=7.1
-   ```
-   with the PAT as a Basic Auth header (`Authorization: Basic base64(:PAT)`).
-3. The returned Markdown content is injected into the agent's context window as reference material.
-4. Wiki pages are cached locally in `.rival/wiki-cache/` to avoid redundant API calls within the same session.
-
-### Use Cases
-
-- **Architecture decisions**: Agents read ADR (Architecture Decision Record) wiki pages before planning.
-- **Team conventions**: Coding standards, naming conventions, and PR templates.
-- **Domain glossary**: Business terms and definitions that inform variable naming and documentation.
-
----
-
-## 4. Board Integration
-
-The `/rival:research` skill can create work items (tickets) directly on Azure DevOps Boards from research findings.
-
-### How It Works
-
-1. During `/rival:research`, the agent identifies actionable findings -- bugs, tech debt, missing features, or improvements.
-2. Each finding is formatted as a work item proposal and presented to the user for approval.
-3. On approval, the agent calls the Azure DevOps REST API:
-   ```
-   POST https://dev.azure.com/{org}/{project}/_apis/wit/workitems/$Task?api-version=7.1
-   Content-Type: application/json-patch+json
-   Authorization: Basic base64(:PAT)
-   ```
-4. The work item is created with the fields described in section 5 below.
-5. The agent returns the work item URL to the user for confirmation.
-
-### Permissions Required
-
-The PAT must have the **Work Items (Read, Write)** scope. If the scope is missing, the agent will warn the user and skip ticket creation.
-
----
-
-## 5. Ticket Creation Format
-
-When Rival creates a work item on Azure DevOps Boards, it uses the following fields:
-
-### Required Fields
-
-| Field | API Path | Description | Example |
-|-------|----------|-------------|---------|
-| Title | `/fields/System.Title` | Short summary of the work item | `Fix null reference in QuotationService.Calculate()` |
-| Description | `/fields/System.Description` | HTML-formatted body with context, root cause, and proposed fix | See template below |
-| Area Path | `/fields/System.AreaPath` | Team area (from `.paths.md` default or overridden) | `RPM\Backend` |
-| Iteration Path | `/fields/System.IterationPath` | Sprint/iteration (from `.paths.md` default or overridden) | `RPM\Sprint 42` |
-
-### Optional Fields
+### Work Item Fields
 
 | Field | API Path | Description |
 |-------|----------|-------------|
-| Acceptance Criteria | `/fields/Microsoft.VSTS.Common.AcceptanceCriteria` | HTML-formatted list of conditions for completion |
-| Tags | `/fields/System.Tags` | Semicolon-separated tags, e.g. `rival-generated; tech-debt` |
-| Priority | `/fields/Microsoft.VSTS.Common.Priority` | 1 (Critical) through 4 (Low) |
-| Work Item Type | URL parameter `$Type` | `Task`, `Bug`, `User Story`, or `Feature` |
-
-### Description Template
-
-```html
-<h3>Context</h3>
-<p>Found during <code>/rival:research</code> analysis of <code>{repo-name}</code>.</p>
-
-<h3>Finding</h3>
-<p>{detailed description of the issue or improvement}</p>
-
-<h3>Proposed Fix</h3>
-<p>{suggested approach to resolve the issue}</p>
-
-<h3>References</h3>
-<ul>
-  <li>File: <code>{file-path}</code>, Line {line-number}</li>
-  <li>Related wiki: <a href="{wiki-url}">{page-title}</a></li>
-</ul>
-
-<p><em>Auto-generated by Rival Plugin</em></p>
-```
-
-### Acceptance Criteria Template
-
-```html
-<ul>
-  <li>[ ] {criterion 1}</li>
-  <li>[ ] {criterion 2}</li>
-  <li>[ ] Unit tests pass with no regressions</li>
-  <li>[ ] Code reviewed and approved</li>
-</ul>
-```
-
-### Example API Payload
-
-```json
-[
-  {
-    "op": "add",
-    "path": "/fields/System.Title",
-    "value": "Fix null reference in QuotationService.Calculate()"
-  },
-  {
-    "op": "add",
-    "path": "/fields/System.Description",
-    "value": "<h3>Context</h3><p>Found during <code>/rival:research</code> analysis of <code>quotation-api</code>.</p>..."
-  },
-  {
-    "op": "add",
-    "path": "/fields/System.AreaPath",
-    "value": "RPM\\Backend"
-  },
-  {
-    "op": "add",
-    "path": "/fields/System.IterationPath",
-    "value": "RPM\\Sprint 42"
-  },
-  {
-    "op": "add",
-    "path": "/fields/Microsoft.VSTS.Common.AcceptanceCriteria",
-    "value": "<ul><li>[ ] Null check added before Calculate() call</li><li>[ ] Unit test covers null input scenario</li></ul>"
-  },
-  {
-    "op": "add",
-    "path": "/fields/System.Tags",
-    "value": "rival-generated; bug"
-  }
-]
-```
+| Title | `/fields/System.Title` | Short summary |
+| Description | `/fields/System.Description` | HTML-formatted body with context and proposed fix |
+| Area Path | `/fields/System.AreaPath` | Team area |
+| Iteration Path | `/fields/System.IterationPath` | Sprint/iteration |
+| Tags | `/fields/System.Tags` | `rival-generated; {category}` |
 
 ---
 
-## Next Steps
+## 8. Windows Support
 
-- [ ] Implement the full `scripts/setup-devops.sh` (replace placeholder)
-- [ ] Add `.paths.md` parser to `/rival:init`
-- [ ] Build wiki fetcher with caching
-- [ ] Build work item creation module
-- [ ] Add board integration to `/rival:research` output
+The Python export script works on all platforms. The shell wrapper (`setup-devops.sh`) is Mac/Linux only.
+
+| Platform | How to Run |
+|----------|-----------|
+| macOS | `/rival:rival-init` (recommended) or `bash setup-devops.sh` |
+| Linux | `/rival:rival-init` (recommended) or `bash setup-devops.sh` |
+| Windows | `/rival:rival-init` (recommended) or run the Python script directly via PowerShell |
+
+Windows users running Claude Code will use `/rival:rival-init` which calls the Python script directly — no shell wrapper needed.
+
+---
+
+## 9. Refreshing / Re-pulling
+
+To update repos and wikis after initial setup:
+
+- **Via Rival**: Run `/rival:rival-init` and choose option 4 ("Re-pull from Azure DevOps")
+- **Via shell**: `bash setup-devops.sh --refresh`
+- **Via Python**: Re-run the export script (it does `git fetch + pull` on existing repos)
+- **Via config**: Rival reads `config.paths.export_script` and `config.paths.python_cmd` to run the script
