@@ -146,6 +146,18 @@ Store the triage in state.json:
 
 Skip entirely for LIGHT. For DISCUSSION: research only, skip Phase 4.
 
+### 3.0 Check for Research Preload
+
+Before spawning research agents, check if a research preload exists from `/rival:rival-research`:
+
+```
+.rival/workstreams/<id>/research-preload.md
+```
+
+If this file exists, read it and skip Step 3.1 (research agent spawning). The user already did research via `/rival:rival-research` and converted it to this workstream. Use the preloaded findings directly — do not duplicate research.
+
+If the file does NOT exist, proceed to Step 3.1 as normal.
+
 ### 3.1 Spawn Research Agents in Parallel
 
 ```
@@ -533,7 +545,7 @@ On **Reject**: Reset state to `planning`, ask for new direction.
 | Edge Case | What Happens |
 |-----------|-------------|
 | `/rival:execute` with no approved plan | "No approved plan found. Run `/rival:plan` first." |
-| `/rival:plan` with no config | "Rival not configured. Run `/rival:init` first." |
+| `/rival:plan` with no config | "Rival not configured. Run `/rival:rival-init` first." |
 | Codex CLI not installed | Fallback to skeptical-reviewer, warn user |
 | Configured repo path doesn't exist | Warn: "Repo '<name>' not found at path. Skipping." Continue with available repos |
 | Conflicting research results | Plan presents both sides with tradeoffs, doesn't silently pick one |

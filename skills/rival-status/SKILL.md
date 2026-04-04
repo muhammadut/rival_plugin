@@ -61,7 +61,6 @@ user-avatars-20260214: ██████░░ building (6/8)
 
 Phase progress mapping:
 - `planning` → 2/8
-- `plan-ready` → 3/8
 - `plan-approved` → 4/8
 - `building` → 6/8
 - `build-complete` → 7/8
@@ -85,10 +84,9 @@ Phase progress mapping:
 
 - **Type:** brownfield
 - **Stack:** TypeScript / Express / Jest / Prisma / Node
-- **Frameworks:** C4, DDD, BDD
-- **Codex CLI:** ✓ Available
 - **Repos:** 4 (this + 3 related)
 - **Experts:** azure, ef-core, service-bus
+- **Review:** Codex CLI ✓ Available
 ```
 
 After the project config summary, read `.rival/knowledge/*.md` files and display a knowledge status line:
@@ -114,7 +112,7 @@ For each active workstream, suggest the next command based on its phase:
 ```
 
 Phase-to-next-command mapping:
-- `planning`, `plan-ready` → "`/rival:plan`"
+- `planning` → "`/rival:plan`"
 - `plan-approved` → "`/rival:execute`"
 - `building` → "Building in progress"
 - `build-complete` → "`/rival:verify`"

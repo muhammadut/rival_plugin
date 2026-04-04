@@ -20,7 +20,7 @@ Read `.rival/config.json`. If missing:
 
 Store:
 - `stack` — language, framework, test_framework (for test commands and sub-agent prompts)
-- `frameworks` — to check if TDD is enabled
+- `repos` — list of repos with paths and roles
 
 ### 1.2 Resolve Workstream
 

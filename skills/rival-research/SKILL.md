@@ -20,7 +20,7 @@ Extract:
 
 If `.rival/config.json` does not exist or is incomplete, proceed with basic research but inform the user:
 
-> "No Rival config found. Running general research without stack-specific context. Run `/rival:init` to configure your project for better results."
+> "No Rival config found. Running general research without stack-specific context. Run `/rival:rival-init` to configure your project for better results."
 
 ## Step 2: Parse the Question
 
@@ -107,7 +107,7 @@ For each option, present:
 [If applicable — hosting costs, licensing, third-party service fees, etc. Write "No additional cost" if none.]
 
 **Stack-specific notes:**
-[How this option interacts with their configured stack. If no config, write "Configure with /rival:init for stack-specific guidance."]
+[How this option interacts with their configured stack. If no config, write "Configure with /rival:rival-init for stack-specific guidance."]
 ```
 
 Order options from most recommended to least. Lead with a brief recommendation statement:
@@ -187,7 +187,7 @@ Ask for clarification (see Step 2). Do not guess.
 ### No expert domains configured
 Run only the industry researcher agent. Include a note:
 
-> "No expert domains configured. Research is based on general industry patterns. Run `/rival:init` to add expert domains for deeper, more targeted research."
+> "No expert domains configured. Research is based on general industry patterns. Run `/rival:rival-init` to add expert domains for deeper, more targeted research."
 
 ### User asks about tech not in their stack
 Still research it fully, but add a prominent note:

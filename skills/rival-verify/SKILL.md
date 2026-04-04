@@ -105,7 +105,7 @@ If `codex` is not found on PATH, fall back immediately. Warn the user:
 Spawn the skeptical reviewer:
 
 ```
-Task(
+Agent(
   subagent_type="rival:skeptical-reviewer",
   description="Code Verification: <feature name>",
   prompt=<verification prompt from codex-verify-prompt.md>

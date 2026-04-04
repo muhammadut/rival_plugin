@@ -9,12 +9,17 @@ argument-hint: [workstream-name]
 
 After a workstream completes, analyze all artifacts and extract persistent knowledge for future planning.
 
+## Step 0: Check Configuration
+
+Read `.rival/config.json`. If missing:
+> "Rival isn't configured for this project. Run `/rival:rival-init` first."
+
 ## Step 1: Resolve Workstream
 
 Use the standard workstream resolution priority to identify the target workstream:
 
 1. If a workstream name was passed as an argument, use it directly.
-2. If no argument, check for an active workstream in `.rival/state.json`.
+2. If no argument, scan `.rival/workstreams/*/state.json` for active (non-archived) workstreams. Auto-select if only one exists.
 3. If multiple candidates exist, ask the user to choose.
 
 Read `.rival/workstreams/<id>/state.json` to load workstream metadata (name, status, dates, tasks).
