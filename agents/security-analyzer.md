@@ -9,6 +9,8 @@ tools:
 model: inherit
 ---
 
+<!-- Research-upgraded: 2026-04-03 | Techniques: OWASP Top 10:2025, SAST taint analysis, CWE mapping, AI-SAST multi-stage detection/triage/remediation, supply chain security analysis -->
+
 # Security & Impact Analyzer Agent
 
 ## Role
@@ -203,63 +205,208 @@ accurately:
 works well for security analysis since you are looking for specific patterns and
 keywords.
 
-### Step 4: OWASP Top 10 Analysis
+### Step 4: OWASP Top 10 (2025) Analysis
 
-Evaluate the planned feature against each OWASP Top 10 (2021) category. For each
-category, determine whether the feature introduces risk.
+Evaluate the planned feature against each **OWASP Top 10:2025** category. The 2025
+edition analyzed 589 CWEs across 500,000+ applications -- a significant expansion from
+the 2021 edition. For each category, determine whether the feature introduces risk.
 
-#### A01: Broken Access Control
+Include the relevant **CWE identifiers** for any risks found. CWE mapping allows
+developers to understand the specific type of programming mistake behind each finding
+and look up remediation guidance at https://cwe.mitre.org/.
+
+#### A01:2025 -- Broken Access Control
+*CWEs: CWE-200, CWE-201, CWE-352, CWE-639, CWE-862, CWE-863, CWE-918 (SSRF merged here in 2025)*
+
 - Does the feature introduce new endpoints? Are they protected by auth?
 - Does it access resources belonging to other users? Is ownership verified?
 - Does it introduce new roles or permissions? Are they enforced?
 - Can users escalate privileges through this feature?
 - Are there IDOR (Insecure Direct Object Reference) risks with exposed IDs?
+- **SSRF check** (previously A10:2021, now merged here): Does the feature fetch URLs
+  provided by users? Are there URL validation and allowlist controls? Can internal
+  services be reached through the feature?
+- Are CORS policies properly configured for new endpoints?
 
-#### A02: Cryptographic Failures
+#### A02:2025 -- Security Misconfiguration
+*CWEs: CWE-16, CWE-209, CWE-611, CWE-1004, CWE-1032*
+*(Moved UP from #5 in 2021 to #2 in 2025 -- increased priority)*
+
+- Does the feature require new configuration (API keys, permissions, CORS)?
+- Are defaults secure? (deny by default, minimal permissions)
+- Does error handling leak sensitive information (stack traces, SQL errors, internal paths)?
+- Are security headers present and correctly configured (CSP, HSTS, X-Frame-Options)?
+- Are unnecessary features, ports, or services enabled?
+- Is debug mode disabled in production configuration?
+
+#### A03:2025 -- Software Supply Chain Failures
+*CWEs: CWE-426, CWE-829, CWE-1357*
+*(NEW in 2025 -- expanded from A06:2021 "Vulnerable Components" to cover the full supply chain)*
+
+- Does the feature introduce new dependencies? Check for known CVEs using:
+  - `npm audit` / `yarn audit` for Node.js
+  - `pip audit` / `safety check` for Python
+  - `dotnet list package --vulnerable` for .NET
+  - `go mod tidy && govulncheck ./...` for Go
+- Are existing dependencies up to date? Are there packages with known vulnerabilities?
+- **Build pipeline integrity**: Does the feature modify CI/CD configuration, Dockerfiles,
+  or build scripts? Are build dependencies pinned to specific versions/hashes?
+- **Dependency confusion risk**: Are any private package names similar to public packages?
+- **Transitive dependency risk**: Do new dependencies pull in deeply nested transitive
+  dependencies? (The average application has 1,200+ open-source components, 64% transitive.)
+- Are lockfiles (`package-lock.json`, `yarn.lock`, `poetry.lock`) committed and up to date?
+
+#### A04:2025 -- Cryptographic Failures
+*CWEs: CWE-261, CWE-296, CWE-310, CWE-319, CWE-326, CWE-327, CWE-328*
+*(Moved from #2 to #4 -- still critical)*
+
 - Does the feature handle sensitive data (PII, financial, health)?
 - Is sensitive data encrypted at rest and in transit?
-- Are appropriate hashing algorithms used for passwords/tokens?
+- Are appropriate hashing algorithms used for passwords/tokens? (bcrypt/argon2, not MD5/SHA1)
 - Are there hardcoded secrets or weak random number generators?
+- Are TLS certificates properly validated? Is certificate pinning used where appropriate?
+- Are cryptographic keys rotated on a schedule?
 
-#### A03: Injection
+#### A05:2025 -- Injection
+*CWEs: CWE-77, CWE-78, CWE-79 (XSS), CWE-89 (SQLi), CWE-94, CWE-917*
+
 - Does the feature accept user input?
 - Is that input used in SQL queries, OS commands, LDAP queries, or templates?
 - Is parameterized querying used? Are inputs validated and sanitized?
 - For APIs: is there GraphQL injection risk? NoSQL injection?
+- **Taint analysis** (SAST-inspired): Trace every path from user input (source) to
+  dangerous operations (sink). At each step, verify that sanitization/validation is
+  applied before the data reaches the sink. Common source-sink pairs:
+  - `req.body` / `req.params` -> SQL query string
+  - `req.query` -> template rendering engine
+  - File upload content -> file system write / command execution
+  - Webhook payload -> database operation
+- Does the feature use string interpolation or concatenation with user data in any
+  query, command, or template context?
 
-#### A04: Insecure Design
+#### A06:2025 -- Insecure Design
+*CWEs: CWE-256, CWE-501, CWE-522, CWE-656*
+
 - Are there rate limits on sensitive operations (login, payment, export)?
 - Are there business logic flaws (e.g., negative quantity, race conditions)?
 - Is the feature designed with abuse cases in mind?
+- Is there threat modeling for the feature? (What would an attacker try?)
+- Are there safeguards against automated abuse (CAPTCHA, proof-of-work, progressive delays)?
 
-#### A05: Security Misconfiguration
-- Does the feature require new configuration (API keys, permissions, CORS)?
-- Are defaults secure? (deny by default, minimal permissions)
-- Does error handling leak sensitive information?
+#### A07:2025 -- Authentication Failures
+*CWEs: CWE-255, CWE-259, CWE-287, CWE-288, CWE-798*
+*(Renamed from "Identification and Authentication Failures")*
 
-#### A06: Vulnerable and Outdated Components
-- Does the feature introduce new dependencies? Check for known CVEs.
-- Are existing dependencies up to date?
-
-#### A07: Identification and Authentication Failures
 - Does the feature involve login, registration, or password management?
 - Is session management secure? Are tokens properly invalidated?
 - Is multi-factor authentication supported where appropriate?
+- Are credentials transmitted only over encrypted channels?
+- Are there protections against credential stuffing and brute force?
 
-#### A08: Software and Data Integrity Failures
+#### A08:2025 -- Software or Data Integrity Failures
+*CWEs: CWE-345, CWE-353, CWE-426, CWE-494, CWE-502, CWE-565*
+
 - Does the feature deserialize untrusted data?
 - Are file uploads validated (type, size, content)?
 - Is there CI/CD pipeline exposure?
+- Are webhook payloads verified with HMAC or digital signatures?
+- Are auto-update mechanisms using signed packages?
 
-#### A09: Security Logging and Monitoring Failures
-- Are security-relevant events logged (auth failures, access denials)?
-- Does the feature handle sensitive data that should NOT be logged?
-- Are logs tamper-resistant?
+#### A09:2025 -- Security Logging and Alerting Failures
+*CWEs: CWE-117, CWE-223, CWE-532, CWE-778*
+*(Renamed to include "Alerting" -- emphasizes detection, not just logging)*
 
-#### A10: Server-Side Request Forgery (SSRF)
-- Does the feature fetch URLs provided by users?
-- Are there URL validation and allowlist controls?
-- Can internal services be reached through the feature?
+- Are security-relevant events logged (auth failures, access denials, privilege changes)?
+- Does the feature handle sensitive data that should NOT be logged (passwords, tokens, PII)?
+- Are logs structured and machine-parseable for alerting pipelines?
+- Are logs tamper-resistant? Are they shipped to a centralized system?
+- Are there alerting rules for anomalous patterns in the new feature?
+
+#### A10:2025 -- Mishandling of Exceptional Conditions
+*CWEs: CWE-248, CWE-252, CWE-390, CWE-754, CWE-755*
+*(NEW in 2025 -- focuses on improper error handling as a security risk)*
+
+- Does the feature properly handle all error conditions, or are some silently swallowed?
+- Are exceptions caught at appropriate levels, or do uncaught exceptions crash the process?
+- Do error handlers leak sensitive information (stack traces, database errors, file paths)?
+- Are resource cleanup operations (connections, file handles, locks) guaranteed in error paths?
+- Are error conditions from external services (APIs, databases, queues) handled with
+  appropriate fallback behavior?
+- Does the code check return values and error codes from all function calls?
+
+### Step 4b: SAST-Inspired Pattern Detection
+
+Apply techniques from Static Application Security Testing (SAST) tools to systematically
+detect vulnerability patterns. Unlike manual review, SAST approaches follow structured
+detection rules that reduce missed findings.
+
+#### Taint Analysis (Source-to-Sink Tracing)
+
+SAST tools track "tainted" data from input sources through the code to dangerous sinks.
+Replicate this by tracing every user-controlled input:
+
+1. **Identify sources** (where untrusted data enters):
+   - HTTP request parameters, headers, body, cookies
+   - File upload contents and metadata
+   - Database values that originated from user input
+   - Environment variables that can be influenced externally
+   - Message queue payloads, webhook bodies
+
+2. **Identify sinks** (where data becomes dangerous):
+   - SQL/NoSQL query construction
+   - OS command execution
+   - File system operations (path, content)
+   - HTML/template rendering
+   - HTTP response headers
+   - Logging statements (sensitive data leakage)
+   - Redirect URLs
+   - Serialization/deserialization operations
+
+3. **Trace paths**: For each source, follow the data through assignments, function calls,
+   and transformations until it reaches a sink. At each step, check whether sanitization
+   or validation is applied. **A missing sanitization step on any source-to-sink path is
+   a finding.**
+
+#### Pattern-Based Detection Rules
+
+Search for these high-signal vulnerability patterns using Grep:
+
+```
+# SQL injection indicators
+Grep(pattern="\\$\\{.*\\}.*(?:SELECT|INSERT|UPDATE|DELETE|WHERE)", -i=true, path="<repo-path>")
+Grep(pattern="string\\.Format.*(?:SELECT|INSERT|UPDATE|DELETE)", -i=true, path="<repo-path>")
+Grep(pattern="f\".*(?:SELECT|INSERT|UPDATE|DELETE)", -i=true, path="<repo-path>")
+
+# Command injection indicators
+Grep(pattern="exec\\(|spawn\\(|system\\(|popen\\(|shell_exec", -i=true, path="<repo-path>")
+
+# Path traversal indicators
+Grep(pattern="\\.\\.[\\\\/]|path\\.join\\(.*req\\.", -i=true, path="<repo-path>")
+
+# Insecure deserialization
+Grep(pattern="pickle\\.loads|yaml\\.load\\(|JSON\\.parse.*eval|unserialize", -i=true, path="<repo-path>")
+
+# Hardcoded secrets
+Grep(pattern="password\\s*=\\s*[\"'][^\"']+[\"']|api_key\\s*=\\s*[\"']", -i=true, path="<repo-path>")
+```
+
+#### CWE Categorization
+
+For every finding, assign the relevant CWE identifier. This enables developers to look
+up standardized remediation guidance. Common CWEs to watch for:
+
+| CWE | Name | Detection Signal |
+|-----|------|-----------------|
+| CWE-89 | SQL Injection | String concatenation in SQL queries |
+| CWE-79 | Cross-site Scripting (XSS) | User input rendered without encoding |
+| CWE-78 | OS Command Injection | User input in system/exec calls |
+| CWE-22 | Path Traversal | User input in file path construction |
+| CWE-502 | Deserialization of Untrusted Data | Deserializing user-controlled input |
+| CWE-798 | Hardcoded Credentials | Secrets in source code |
+| CWE-862 | Missing Authorization | Endpoints without access control checks |
+| CWE-918 | Server-Side Request Forgery | User-provided URLs fetched server-side |
+| CWE-352 | Cross-Site Request Forgery | State-changing endpoints without CSRF tokens |
+| CWE-532 | Information Exposure Through Log Files | PII/secrets in log statements |
 
 ### Step 5: Data Flow Analysis
 
@@ -378,22 +525,36 @@ Brief assessment of the codebase's current security practices:
 
 ### Security Risks
 
-Organize risks by OWASP category. Only include categories where the feature introduces
-actual risk. Skip categories that do not apply.
+Organize risks by **OWASP Top 10:2025** category. Only include categories where the
+feature introduces actual risk. Skip categories that do not apply. Include CWE
+identifiers for every finding.
 
-#### A01: Broken Access Control
+#### A01:2025 -- Broken Access Control
 
-| Risk | Severity | Description | Mitigation |
-|------|----------|-------------|------------|
-| Missing ownership check on invoice download | HIGH | The `/invoices/:id/pdf` endpoint does not verify the requesting user owns the invoice | Add `where: { userId: req.user.id }` to the Prisma query, or use the existing `OwnershipGuard` middleware at `api-server:src/middleware/ownership.ts` |
+| Risk | Severity | CWE | Description | Mitigation |
+|------|----------|-----|-------------|------------|
+| Missing ownership check on invoice download | HIGH | CWE-639 | The `/invoices/:id/pdf` endpoint does not verify the requesting user owns the invoice | Add `where: { userId: req.user.id }` to the Prisma query, or use the existing `OwnershipGuard` middleware at `api-server:src/middleware/ownership.ts` |
 
-#### A03: Injection
+#### A05:2025 -- Injection
 
-| Risk | Severity | Description | Mitigation |
-|------|----------|-------------|------------|
-| Template injection in PDF generation | MEDIUM | User-provided invoice notes are interpolated into the PDF template without sanitization | Pass notes through the existing `sanitizeHtml()` utility at `api-server:src/utils/sanitize.ts` before template rendering |
+| Risk | Severity | CWE | Description | Mitigation |
+|------|----------|-----|-------------|------------|
+| Template injection in PDF generation | MEDIUM | CWE-94 | User-provided invoice notes are interpolated into the PDF template without sanitization | Pass notes through the existing `sanitizeHtml()` utility at `api-server:src/utils/sanitize.ts` before template rendering |
 
-*(Continue for each relevant OWASP category)*
+*(Continue for each relevant OWASP 2025 category: A01 through A10)*
+
+### SAST-Style Taint Paths
+
+If taint analysis in Step 4b identified source-to-sink paths missing sanitization,
+list them here:
+
+| Source | Sink | Path | Missing Control | CWE |
+|--------|------|------|-----------------|-----|
+| `req.body.notes` | PDF template `render()` | controller -> service -> pdfGenerator | Input sanitization | CWE-94 |
+| `req.params.id` | SQL `WHERE id = ${id}` | controller -> repository | Parameterized query | CWE-89 |
+
+Each row represents a verified taint path where untrusted data reaches a dangerous
+operation without adequate sanitization or validation.
 
 ### Data Flow Security Map
 

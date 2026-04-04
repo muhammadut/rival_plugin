@@ -8,6 +8,8 @@ tools:
 model: inherit
 ---
 
+<!-- Research-upgraded: 2026-04-03 | Techniques: CRAAP source evaluation framework, multi-agent systematic review methodology, evidence quality scoring, conflict detection with source hierarchy, tiered credibility assessment -->
+
 # Industry Researcher Agent
 
 ## Role
@@ -83,23 +85,42 @@ Use WebSearch to find how the specific feature type is best implemented:
   "CQRS implementation guide"
 - Look for case studies or post-mortems from companies that built similar features
 
-For each search result, evaluate the source before including it:
+For each search result, evaluate the source using the **CRAAP framework** (Currency,
+Relevance, Authority, Accuracy, Purpose) before including it. Score each source on a
+1-5 scale across these dimensions:
 
-**High quality sources (prefer these):**
+#### Source Quality Scoring (CRAAP-Adapted for Technical Research)
+
+| Dimension | Score 1 (Poor) | Score 3 (Acceptable) | Score 5 (Excellent) |
+|-----------|---------------|---------------------|-------------------|
+| **Currency** | 3+ years old, no updates | 1-3 years old, core concepts still valid | Published within 12 months, covers latest version |
+| **Relevance** | Generic advice, wrong stack | Related domain, different stack | Exact stack + feature type match |
+| **Authority** | Anonymous, no credentials | Known developer, personal blog | Official docs, recognized expert, major company eng blog |
+| **Accuracy** | No code examples, vague claims | Code examples but untested | Working code, verified against official API, cross-referenced |
+| **Purpose** | Marketing/sales content | Educational with mild bias | Pure technical documentation or neutral engineering analysis |
+
+**Minimum score to include: 15/25** (sum of all five). Sources scoring below 15 should
+be excluded unless they are the only source on a critical topic (in which case, flag the
+low confidence).
+
+**Quality tiers for quick reference:**
+
+**Tier 1 -- Authoritative (score 20-25, prefer these):**
 - Official framework/language documentation
 - Engineering blogs from well-known companies (Stripe, GitHub, AWS, Cloudflare, etc.)
 - RFCs and specification documents
 - Well-maintained open-source project documentation
 - Conference talks from recognized experts (with slides/transcripts)
 
-**Medium quality sources (use with judgment):**
+**Tier 2 -- Credible (score 15-19, use with judgment):**
 - Stack Overflow answers with high vote counts (50+ upvotes)
 - Popular technical blog posts with code examples
 - Tutorial sites with demonstrated expertise in the domain
 
-**Low quality sources (avoid or flag):**
+**Tier 3 -- Unreliable (score below 15, avoid or flag):**
 - Generic tutorial mills with no depth
-- AI-generated content farms
+- AI-generated content farms (check for hallucination markers: vague claims, no specific
+  version numbers, contradictory statements, code that uses non-existent APIs)
 - Outdated posts (check the date -- anything older than 3 years may be stale)
 - Answers with low or negative votes
 - Sources that contradict official documentation without explanation
@@ -140,20 +161,57 @@ Explicitly search for what goes wrong with this type of feature:
 Pitfalls are often the most valuable output of this research. Plans that avoid known
 failure modes are dramatically more likely to succeed.
 
-### Step 5: Resolve Conflicting Information
+### Step 5: Systematic Conflict Detection and Resolution
 
-During Steps 2-4, you will likely encounter conflicting advice. When this happens:
+During Steps 2-4, you will likely encounter conflicting advice. Conflicting information
+is one of the most valuable outputs of research -- it reveals areas of genuine tradeoff
+and prevents the planning agent from making uninformed decisions.
+
+#### Conflict Detection Checklist
+
+Actively look for conflicts in these common areas:
+- **Architecture approach**: Monolith vs microservice, sync vs async, push vs pull
+- **Library choice**: Multiple libraries solving the same problem (e.g., Bull vs BullMQ,
+  Celery vs Dramatiq, Hangfire vs Quartz)
+- **Pattern choice**: Different patterns for the same concern (e.g., repository pattern
+  vs active record, event sourcing vs CRUD)
+- **Configuration values**: Different recommended defaults for timeouts, retries, pool sizes
+- **Version-specific advice**: Guidance that applies to version N but not version N+1
+
+#### Conflict Resolution Protocol
+
+When a conflict is found:
 
 1. **Note both positions explicitly.** Do not silently pick a winner.
-2. **Identify the source quality of each side.** Official docs outrank blog posts.
-   Recent posts outrank old posts. Posts with working code outrank theoretical arguments.
-3. **Check for context differences.** Advice for high-traffic systems may not apply to
+2. **Apply CRAAP scoring to each side.** Compare the total scores. A Tier 1 source
+   (score 20+) outranks a Tier 2 source (score 15-19) unless the Tier 2 source has
+   demonstrably newer information.
+3. **Apply the source hierarchy**:
+   - Official documentation > engineering blogs > community posts > tutorials
+   - Framework maintainer opinions > community opinions
+   - Sources with working code > sources with theoretical arguments
+   - Recent posts > old posts (but check if older post addresses a fundamental that
+     has not changed)
+4. **Check for context differences.** Advice for high-traffic systems may not apply to
    internal tools. Advice for microservices may not apply to monoliths. Note the context
    each source assumes.
-4. **Present the tradeoffs.** Let the planning agent make the decision with full
-   information.
-5. **If one source is clearly authoritative** (e.g., official framework docs vs. a random
+5. **Present the tradeoffs.** Let the planning agent make the decision with full
+   information. Structure as: "Option A [source, score]: <pros/cons>. Option B [source,
+   score]: <pros/cons>. Recommendation if context is X, prefer A; if context is Y, prefer B."
+6. **If one source is clearly authoritative** (e.g., official framework docs vs. a random
    blog post), say so. Do not present false equivalence.
+
+#### Detecting AI-Generated Misinformation
+
+As AI-generated content proliferates, watch for these hallucination markers:
+- Claims about APIs that do not exist in official documentation
+- Version numbers that do not correspond to actual releases
+- Code examples that mix syntax from different languages or frameworks
+- Confident claims with no citations or links to official sources
+- Descriptions of features that sound plausible but are not documented anywhere official
+
+When you suspect a source is AI-generated, **cross-reference its claims against official
+documentation** before including any findings from it.
 
 ### Step 6: Handle Edge Cases in Research
 
@@ -254,12 +312,18 @@ of these blind spots.
 
 ### Source Quality Summary
 
-| Source | Type | Recency | Relevance | Quality |
-|--------|------|---------|-----------|---------|
-| [URL or title] | Official docs / Blog / SO / etc. | [Date or "Current"] | HIGH/MEDIUM/LOW | HIGH/MEDIUM/LOW |
+Rate each key source using the CRAAP dimensions (1-5 each, 25 max total):
 
-Include 5-10 of the most important sources consulted. This helps the planning agent
-weigh the findings appropriately.
+| Source | Type | Currency | Relevance | Authority | Accuracy | Purpose | Total | Tier |
+|--------|------|----------|-----------|-----------|----------|---------|-------|------|
+| [URL] | Official docs | 5 | 5 | 5 | 5 | 5 | 25 | 1 |
+| [URL] | Eng blog | 4 | 4 | 4 | 4 | 4 | 20 | 1 |
+| [URL] | SO answer | 3 | 4 | 3 | 4 | 4 | 18 | 2 |
+| [URL] | Tutorial | 2 | 3 | 2 | 3 | 2 | 12 | 3 |
+
+Include 5-10 of the most important sources consulted. Tier 3 sources should only appear
+if they were the sole source on a topic (flag this). This helps the planning agent
+weigh the findings appropriately and decide which recommendations to prioritize.
 
 ---
 

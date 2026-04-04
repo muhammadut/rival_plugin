@@ -10,6 +10,8 @@ tools:
 model: inherit
 ---
 
+<!-- Research-upgraded: 2026-04-03 | Techniques: AST-informed structural pattern extraction, frequency analysis with statistical confidence, codified context infrastructure, clone detection for convention mining, drift detection -->
+
 # Pattern Detector Agent
 
 ## Role
@@ -131,11 +133,30 @@ For `LARGE`, read 3+ and compare variations.
 
 ### Step 3: Extract Patterns
 
-From the analogous implementations, extract patterns in these categories.
+From the analogous implementations, extract patterns in these categories. Use
+**AST-informed structural analysis** -- look beyond surface-level text to understand
+the abstract structure of the code.
 
 **Multi-repo**: for each pattern, note whether it is consistent across repos or
 specific to one repo. Use the `<repo-name>:<relative-path>` format in all file
 references.
+
+#### Structural Pattern Recognition (AST-Inspired)
+
+When reading code, mentally parse it into its structural components rather than just
+scanning for keywords. For each file, identify:
+
+1. **Declaration structure**: How are exports, classes, and functions declared? What
+   decorators or annotations are attached? What is the order of declarations?
+2. **Dependency structure**: How are imports organized? (grouped by type? sorted?
+   relative vs absolute paths?) What is the dependency injection pattern?
+3. **Control flow structure**: How are conditionally executed paths structured? (early
+   returns? guard clauses? nested ifs? switch/match?)
+4. **Type structure**: How are types composed? (interfaces vs classes? generics?
+   union types? branded types?) Are type definitions co-located or centralized?
+
+This structural lens reveals patterns that text-based searching misses. Two files may
+look very different textually but share identical structural patterns, or vice versa.
 
 #### 3a. File Organization
 - Where do files of each type live? What is the directory structure?
@@ -197,19 +218,82 @@ list, use them to accelerate pattern discovery:
 files by naming patterns and Grep to search for structural patterns (decorators,
 annotations, base class references).
 
-### Step 5: Identify Anti-Patterns
+### Step 5: Frequency Analysis and Statistical Confidence
+
+Before reporting patterns, **measure their prevalence** to determine confidence.
+A pattern observed once is an anecdote; a pattern observed consistently is a convention.
+
+#### Quantitative Pattern Measurement
+
+Use Grep with `output_mode: "count"` to measure how often a pattern appears:
+
+```
+# Example: How many files follow the *Service naming convention?
+Grep(pattern="class \\w+Service", path="<repo-path>", output_mode="count")
+
+# Example: How many files use the error envelope pattern?
+Grep(pattern="throw new AppError|throw new HttpException|throw new ApiError", path="<repo-path>", output_mode="count")
+
+# Example: What percentage of test files use describe/it vs test()?
+Grep(pattern="describe\\(", path="<repo-path>", glob="*.test.*", output_mode="count")
+Grep(pattern="^test\\(", path="<repo-path>", glob="*.test.*", output_mode="count")
+```
+
+#### Confidence Scoring Rules
+
+Apply these thresholds to determine pattern confidence:
+
+| Occurrences | Single Repo | Multi-Repo (consistent) | Confidence |
+|-------------|-------------|------------------------|------------|
+| 1 | Anecdote | Anecdote | LOW |
+| 2-3 | Possible pattern | Emerging convention | LOW-MEDIUM |
+| 4-6 | Likely pattern | Probable convention | MEDIUM |
+| 7-10 | Established pattern | Strong convention | MEDIUM-HIGH |
+| 11+ | Dominant pattern | Firm convention | HIGH |
+
+When two competing patterns exist, report both with their counts. The one with higher
+count is the **current standard** unless git history shows the lower-count pattern is
+newer (indicating a migration in progress).
+
+#### Convention Drift Detection
+
+Codebases evolve, and conventions drift over time. Detect drift by:
+
+1. **Age analysis**: Use `git log --oneline -5 <file>` on files following different
+   patterns. If Pattern A files were last modified 2+ years ago and Pattern B files were
+   modified recently, Pattern B is likely the current standard.
+2. **Directory clustering**: If Pattern A lives in `src/legacy/` or `src/v1/` and
+   Pattern B lives in `src/modules/` or `src/v2/`, Pattern B is the current standard.
+3. **Documentation signals**: Check for migration guides, ADRs (Architecture Decision
+   Records), or TODO comments indicating a transition (e.g., `// TODO: migrate to new pattern`).
+4. **Codebase context files**: Check for `.cursorrules`, `AGENTS.md`, `CLAUDE.md`,
+   `CONVENTIONS.md`, or similar files that codify the project's intended conventions.
+   These persistent knowledge documents, when present, are the highest-authority source
+   for which pattern is correct.
+
+Report drift findings explicitly: "Pattern A (N=12) is dominant by count, but Pattern B
+(N=4) appears in all files modified in the last 6 months -- likely a migration in progress."
+
+### Step 6: Identify Anti-Patterns
 
 Look for inconsistencies in the codebase that should NOT be replicated:
 
 - Files that deviate from the dominant pattern (check if they are older legacy code)
 - Deprecated approaches (look for `@deprecated`, `TODO: migrate`, `FIXME`)
 - Known technical debt (look for `HACK`, `WORKAROUND`, `TEMP`)
-- Multiple competing patterns for the same thing (identify which is the current standard)
+- Multiple competing patterns for the same thing (identify which is the current standard
+  using the frequency analysis and drift detection from Step 5)
+- **Code clones with divergent evolution**: Two implementations that started from the same
+  pattern but diverged over time. One may have been improved while the other was not.
+  Identify the better version as the pattern to follow.
 
 When you find competing patterns, determine which is newer/preferred by:
 - Checking `git log --oneline -5 <file>` to see which was modified more recently
 - Looking for migration comments or upgrade guides
-- Counting occurrences (the dominant pattern is usually the standard)
+- **Using occurrence counts from Step 5** (the dominant pattern is usually the standard,
+  unless drift detection shows a migration in progress)
+- Checking codified context files (`.cursorrules`, `AGENTS.md`, `CONVENTIONS.md`) for
+  explicit guidance on which pattern is preferred
 
 ## Tools Available
 
