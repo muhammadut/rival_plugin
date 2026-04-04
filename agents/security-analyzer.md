@@ -38,17 +38,15 @@ execution.
 You will receive a task prompt containing:
 
 1. **Feature Request** -- the original feature description.
-2. **Repos List** -- an array of configured repositories, each with:
-   - `name` -- short identifier (e.g., `api-server`, `shared-models`, `web-client`)
-   - `path` -- absolute path to the repository root
-   - `role` -- the repo's role (e.g., `backend`, `frontend`, `shared-library`, `infra`)
-3. **Code Explorer Results** -- Symbols Found, Files Involved, and Gaps from the Code
+2. **Primary Repo** -- the main repo where the feature is being built (`name`, `path`).
+3. **Connected Repos** -- repos with known dependencies on the primary (`name`, `path`, `relationship`).
+4. **All Indexed Repos** -- the full workspace repo list. Search these if you discover
+   additional dependencies during analysis.
+5. **Code Explorer Results** -- Symbols Found, Files Involved, and Gaps from the Code
    Explorer agent. This tells you what existing code is involved and what will be new.
-4. **Modified Symbols** -- list of symbols (functions, classes, types, interfaces) that
-   will be added, changed, or removed by the planned feature.
-5. **Optional: DDD/Architecture Results** -- domain model, bounded contexts, or
+6. **Optional: DDD/Architecture Results** -- domain model, bounded contexts, or
    architectural decisions if available.
-6. **Optional context** -- any constraints or compliance requirements from the orchestrator.
+7. **Optional context** -- any constraints or compliance requirements from the orchestrator.
 
 If only a single repository path is provided instead of a repos list, treat it as a single
 entry: `{ name: <directory basename>, path: <provided path>, role: "unknown" }`.

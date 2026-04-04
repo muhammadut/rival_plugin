@@ -24,7 +24,7 @@ Use Glob to find all workstream state files:
 
 If no workstreams found:
 > "No workstreams found. Start planning a feature with:
-> `/rival:plan <describe your feature>`"
+> `/rival:rival-plan <describe your feature>`"
 
 ### Step 3: Read All State Files
 
@@ -82,11 +82,11 @@ Phase progress mapping:
 ```
 ## Project Configuration
 
-- **Type:** brownfield
-- **Stack:** TypeScript / Express / Jest / Prisma / Node
-- **Repos:** 4 (this + 3 related)
+- **Workspace:** multi-repo (47 repos indexed)
+- **Languages:** C# (30) | TypeScript (12) | Python (5)
 - **Experts:** azure, ef-core, service-bus
 - **Review:** Codex CLI ✓ Available
+- **Knowledge sources:** wiki
 ```
 
 After the project config summary, read `.rival/knowledge/*.md` files and display a knowledge status line:
@@ -107,17 +107,17 @@ For each active workstream, suggest the next command based on its phase:
 ```
 ## Next Steps
 
-- **oauth2-auth-20260214** → `/rival:execute` (plan is approved, ready for execution)
+- **oauth2-auth-20260214** → `/rival:rival-execute` (plan is approved, ready for execution)
 - **user-avatars-20260214** → Building in progress
 ```
 
 Phase-to-next-command mapping:
-- `planning` → "`/rival:plan`"
-- `plan-approved` → "`/rival:execute`"
+- `planning` → "`/rival:rival-plan`"
+- `plan-approved` → "`/rival:rival-execute`"
 - `building` → "Building in progress"
-- `build-complete` → "`/rival:verify`"
+- `build-complete` → "`/rival:rival-verify`"
 - `verifying` → "Verification in progress"
-- `archived` → "`/rival:retro` (if knowledge not updated yet)"
+- `archived` → "`/rival:rival-retro` (if knowledge not updated yet)"
 
 ## Important Notes
 

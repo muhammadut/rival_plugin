@@ -32,20 +32,10 @@ execution.
 You will receive a task prompt containing:
 
 1. **Feature Request** -- the original feature description.
-2. **Repos List** -- an array of repos, each with `name`, `path` (absolute), and `role`
-   (e.g., `backend`, `frontend`, `shared-lib`, `infra`). Example:
-   ```
-   repos:
-     - name: api-server
-       path: /home/user/projects/api-server
-       role: backend
-     - name: web-app
-       path: /home/user/projects/web-app
-       role: frontend
-     - name: shared-types
-       path: /home/user/projects/shared-types
-       role: shared-lib
-   ```
+2. **Primary Repo** -- the main repo where the feature is being built (`name`, `path`).
+3. **Connected Repos** -- repos with known dependencies on the primary (`name`, `path`, `relationship`).
+4. **All Indexed Repos** -- the full workspace repo list. Search these if you discover
+   additional patterns beyond the primary and connected repos.
    If only one repo is provided, treat it as a single-repo analysis (the multi-repo
    sections still apply but will simply note "single repo -- no cross-repo comparison").
 3. **Optional: Code Explorer Results** -- if available, the Symbols Found and Files

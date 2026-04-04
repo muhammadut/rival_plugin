@@ -146,7 +146,7 @@ On **Ship it** or **Accept as-is**:
 - Update state to `archived`
 - Print:
 > "Workstream **<id>** archived. All artifacts preserved in `.rival/workstreams/<id>/`.
-> Great work! Consider running `/rival:retro` to capture learnings."
+> Great work! Consider running `/rival:rival-retro` to capture learnings."
 
 On **Fix issues**: Keep state at `build-complete`, user fixes and re-runs `/rival:rival-verify`.
 

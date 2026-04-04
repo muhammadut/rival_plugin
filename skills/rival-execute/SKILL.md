@@ -20,7 +20,8 @@ Read `.rival/config.json`. If missing:
 
 Store:
 - `stack` — language, framework, test_framework (for test commands and sub-agent prompts)
-- `repos` — list of repos with paths and roles
+- `index.repos` — all indexed repos (the plan's metadata identifies which are relevant)
+- `experts` — expert domains
 
 ### 1.2 Resolve Workstream
 
@@ -36,7 +37,7 @@ Read `state.json` from the workstream directory. Phase must be `plan-approved` o
 - If `plan-approved`: proceed
 - If `building`: check for existing progress (see Phase 2 resume logic)
 - If earlier phase: guide to the correct next step
-- If `build-complete` or later: "Build is already complete. Next step: `/rival:verify`"
+- If `build-complete` or later: "Build is already complete. Next step: `/rival:rival-verify`"
 
 ### 1.4 Check for Uncommitted Changes
 
@@ -316,7 +317,7 @@ Update `state.json` phase to `build-complete`:
 > Review all changes: `git diff {first-commit}~1..HEAD`
 > Build log: `.rival/workstreams/{id}/build-log.md`
 >
-> Next step: `/rival:verify` for adversarial code verification."
+> Next step: `/rival:rival-verify` for adversarial code verification."
 
 ## Edge Cases
 

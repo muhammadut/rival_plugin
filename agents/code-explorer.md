@@ -29,29 +29,27 @@ single execution.
 You will receive a task prompt containing:
 
 1. **Feature Request** -- a natural-language description of what needs to be built or changed.
-2. **Repos** -- a JSON list of repositories to explore, each with:
-   - `name` -- short identifier for the repo (used in output paths)
-   - `path` -- filesystem path to the repo root (absolute or relative to working directory)
-   - `role` -- description of what this repo is responsible for
-   ```json
-   [
-     {"name": "rpm-backend", "path": ".", "role": "Main RPM backend API"},
-     {"name": "carrier-service", "path": "../carrier-service", "role": "Calls external carrier APIs"},
-     {"name": "shared-models", "path": "../shared-models", "role": "Shared DTOs and contracts"}
-   ]
-   ```
-3. **Optional context** -- any prior analysis, constraints, or scope hints provided by the orchestrator.
+2. **Primary Repo** -- the main repo where the feature will be built:
+   - `name` -- short identifier
+   - `path` -- filesystem path to the repo root
+3. **Connected Repos** -- repos discovered via dependency tracing from the primary repo:
+   - Each has `name`, `path`, and `relationship` (e.g., "ProjectReference", "imports ConnectorClient")
+4. **All Indexed Repos** -- the full list of repos in the workspace. Search these if you
+   discover dependencies beyond the primary and connected repos.
+5. **Optional context** -- any prior analysis, constraints, or scope hints from the orchestrator.
 
 ## Exploration Depth
 
 Explore as deeply as the task requires. Do not impose artificial limits on your search.
 
 **Prioritization strategy:**
-1. Start with the highest-relevance repos (based on role descriptions and the feature request)
-2. Search for the most specific domain terms first, then broaden
-3. Read high-relevance files completely; skim low-relevance files
-4. Trace dependencies until you reach files that are clearly unrelated
-5. If the feature seems to affect many files across multiple repos, that IS the finding — report it
+1. Start with the **primary repo** — this is where the feature lives
+2. Then explore **connected repos** — these have known dependencies on the primary
+3. If you discover references to repos NOT in the connected list, search them in the **all indexed repos** list
+4. Search for the most specific domain terms first, then broaden
+5. Read high-relevance files completely; skim low-relevance files
+6. Trace dependencies until you reach files that are clearly unrelated
+7. If the feature affects many files across many repos, that IS the finding — report it
 
 **When to stop exploring:**
 - You have found all files that will need to change
@@ -64,22 +62,21 @@ Explore as deeply as the task requires. Do not impose artificial limits on your 
 - The task was labeled as "small" — it may have hidden complexity
 - You already found "some" relevant files — find ALL of them
 
-## Using Repo Roles
+## Using Repo Context
 
-The `role` field on each repo tells you **where to look for what**:
+Infer each repo's role from its name, directory structure, and project files:
 
-- A repo with role mentioning "API", "backend", or "service" likely contains controllers,
-  routes, business logic, and database access.
-- A repo with role mentioning "shared", "contracts", "DTOs", or "models" likely contains
-  type definitions, interfaces, and validation schemas that multiple services depend on.
-- A repo with role mentioning "frontend", "UI", or "client" likely contains components,
-  pages, state management, and API client calls.
-- A repo with role mentioning "carrier", "external", "integration", or "adapter" likely
-  contains outbound API calls, retry logic, and mapping layers.
+- A repo with name containing "api", "backend", or "service" and having controllers/routes
+  likely contains business logic and database access.
+- A repo with name containing "shared", "contracts", "models", or "common" likely contains
+  type definitions and schemas that multiple services depend on.
+- A repo with name containing "frontend", "ui", "web", or "client" likely contains components,
+  pages, and API client calls.
+- A repo with name containing "gateway", "proxy", or "integration" likely contains
+  outbound API calls and mapping layers.
 
-Use these hints to prioritize which repo to search first for a given domain term. For
-example, if the feature involves a new data model, start with the shared-models repo.
-If it involves a new API endpoint, start with the backend repo.
+Use these hints to prioritize exploration. The `relationship` field on connected repos
+also tells you HOW repos are linked (e.g., "ProjectReference" = direct code dependency).
 
 ## Process
 

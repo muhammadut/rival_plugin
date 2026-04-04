@@ -17,9 +17,10 @@ Read `.rival/config.json`. If it doesn't exist, stop and tell the user:
 > "Rival isn't configured for this project yet. Run `/rival:rival-init` first."
 
 Store the config values — you'll need them throughout:
-- `workspace_type` (always "multi-repo" in parent-directory workflow)
-- `index.repos` (array of all indexed repos: {name, path, language, framework})
-- `index.knowledge_sources` (wiki directories, docs, etc.)
+- `project_type` (brownfield/greenfield)
+- `stack` (language, framework, test_framework, orm, runtime)
+- `index.repos` (array of {name, path, language, framework})
+- `index.knowledge_sources` (array of {name, path, type})
 - `experts` (array of expert domain strings)
 - `review.tool` (codex/skeptical-reviewer), `review.fallback`
 
@@ -153,9 +154,13 @@ Assess the feature request against these criteria:
 | Category | Criteria | What Happens |
 |----------|---------|-------------|
 | **LIGHT** | Single file fix, simple bug, small refactor. `--light` flag used. | Minimal scan, quick plan, no research, no auto-review |
-| **MEDIUM** | Single-repo feature, moderate scope, 3-10 files | Full research, focused analysis, full plan, auto-review |
-| **LARGE** | Cross-repo, new subsystems, >10 files, architectural changes | Deep research + expert research, comprehensive analysis, detailed plan with diagrams, auto-review |
+| **MEDIUM** | Single-repo feature, moderate scope, 3-10 files. Does not cross repo boundaries. | Full research, focused analysis, full plan, auto-review |
+| **LARGE** | Cross-repo (based on dependency graph), new subsystems, >10 files, architectural changes | Deep research + expert research, comprehensive analysis, detailed plan with diagrams, auto-review |
 | **DISCUSSION** | Questions about architecture, pros/cons, no implementation. `--discussion` flag. | Research only, comparison document, no execution plan, no auto-review |
+
+Use the dependency graph from Phase 1.7 to inform classification:
+- Feature stays within the primary repo and no connected repos are affected? → could be LIGHT or MEDIUM
+- Feature requires changes in connected repos (based on dependency graph)? → likely LARGE
 
 Override rules:
 - `--light` flag forces LIGHT regardless of complexity (but warn if task looks larger)
@@ -179,7 +184,7 @@ Show the triage result to the user with option to override:
 ```
 Triage: MEDIUM — single-repo feature, ~6 files affected
 Research: industry patterns + azure (from experts)
-Analysis: code-explorer (MEDIUM) + security-analyzer + pattern-detector
+Analysis: code-explorer + security-analyzer + pattern-detector
 Framework docs: DDD (new domain entities detected)
 
 [Accept] [Upgrade to LARGE] [Downgrade to LIGHT]
@@ -606,8 +611,8 @@ On **Approve**: Update state to `plan-approved`.
 ```
 Plan approved. To execute:
 1. Clear your context (Ctrl+L or start a new session)
-2. Run /rival:execute
-   OR /rival:execute <workstream-name> if you have multiple workstreams
+2. Run /rival:rival-execute
+   OR /rival:rival-execute <workstream-name> if you have multiple workstreams
 
 The plan is fully self-contained — the executor needs no prior context.
 ```
@@ -620,8 +625,8 @@ On **Reject**: Reset state to `planning`, ask for new direction.
 
 | Edge Case | What Happens |
 |-----------|-------------|
-| `/rival:execute` with no approved plan | "No approved plan found. Run `/rival:plan` first." |
-| `/rival:plan` with no config | "Rival not configured. Run `/rival:rival-init` first." |
+| `/rival:rival-execute` with no approved plan | "No approved plan found. Run `/rival:rival-plan` first." |
+| `/rival:rival-plan` with no config | "Rival not configured. Run `/rival:rival-init` first." |
 | Codex CLI not installed | Fallback to skeptical-reviewer, warn user |
 | Configured repo path doesn't exist | Warn: "Repo '<name>' not found at path. Skipping." Continue with available repos |
 | Conflicting research results | Plan presents both sides with tradeoffs, doesn't silently pick one |
