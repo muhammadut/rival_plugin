@@ -391,14 +391,19 @@ codex --version 2>/dev/null
 - If the command succeeds (exit code 0): store the version, set `review.tool = "codex"`.
 - If it fails: set `review.tool = "skeptical-reviewer"`, note fallback.
 
-If Codex is found, try to detect the model version from its output or config. Store as `codex_model`.
+If Codex is found, extract the version from the output. Store as `codex_version`.
 
-Try to detect if an API key is configured (do NOT print the key or any part of it):
+**Do NOT check for OPENAI_API_KEY.** Codex CLI uses its own authentication (`codex auth login`), not OPENAI_API_KEY. If Codex is installed and on PATH, assume it is authenticated. Rival calls Codex in headless mode via `codex exec --full-auto` — no API key env var is needed.
+
+Optionally verify Codex auth is working by running a quick test:
+
 ```bash
-[ -n "$OPENAI_API_KEY" ] && echo "set" || echo "not set"
+codex exec "echo hello" --full-auto 2>/dev/null
 ```
-If no key detected, warn the user:
-> "Codex CLI is installed but no API key was detected. Codex review may fail without a key. Set OPENAI_API_KEY to enable."
+
+If this succeeds, Codex is ready. If it fails, note it but still set `review.tool = "codex"` — the user may authenticate before they run `/rival:rival-verify`.
+
+The default Codex model is o4-mini. Rival uses it as-is — do NOT override the model unless the user explicitly asks.
 
 If Codex is not found:
 > "Codex CLI not detected. Rival will use the built-in skeptical-reviewer agent (Claude reviews its own work via adversarial prompting). For cross-model review, install Codex CLI."
@@ -406,6 +411,7 @@ If Codex is not found:
 Always set `review.fallback = "skeptical-reviewer"`.
 
 Do NOT check for Gemini CLI — it has been replaced by Codex.
+Do NOT check for OPENAI_API_KEY — Codex uses its own auth.
 
 ### Step 8: Create Directory Structure
 
@@ -470,7 +476,7 @@ Config format:
   "experts": ["azure", "ef-core", "service-bus", "apim"],
   "review": {
     "tool": "codex",
-    "codex_model": "gpt-5.4",
+    "codex_version": "0.118.0",
     "fallback": "skeptical-reviewer"
   },
   "devops": {
@@ -512,7 +518,7 @@ Notes on config values:
 - `index.languages`: breakdown of repos by primary language (convenience field).
 - `experts`: flat array of domain strings. Used by the expert-researcher agent during planning.
 - `review.tool`: "codex" if Codex CLI detected, otherwise "skeptical-reviewer".
-- `review.codex_model`: only present if Codex detected. Extracted from `codex --version` output.
+- `review.codex_version`: only present if Codex detected. Extracted from `codex --version` output. Codex uses its own auth — no OPENAI_API_KEY needed.
 - `review.fallback`: always "skeptical-reviewer".
 - `devops`: DevOps integration config. Contains `provider`, `organization`, `project`, and `pat_configured`. Set to `null` if no .env or DevOps config was found.
 - `initialized_at`: ISO 8601 UTC timestamp of when init completed.
@@ -542,7 +548,7 @@ Adapt every line to actual values:
 - **Language breakdown** — from `index.languages`, show all detected languages with counts.
 - **Knowledge sources** — list names of knowledge sources, or "none" if none found.
 - **Experts** — comma-separated list from `experts` array.
-- **Review** — if Codex: "Codex CLI ({model})". If fallback: "Built-in skeptical reviewer (no Codex)".
+- **Review** — if Codex: "Codex CLI (v{version})". If fallback: "Built-in skeptical reviewer (no Codex)". Do NOT show OPENAI_API_KEY warnings.
 - **DevOps** — if configured: "Azure DevOps (PAT configured)". If not: "Not configured (add .env to enable)".
 - **Knowledge** — always ".rival/knowledge/ (empty, will grow)".
 
@@ -567,7 +573,7 @@ Then suggest the next step:
 | Wiki or docs directory | Index as a knowledge source, not a code repo. |
 | knowledge/wikis/ exists | Index each subfolder as a knowledge source with type "wiki". |
 | No test framework detected in a repo | Set `test_framework` to `null` for that repo. Do not ask. |
-| Codex CLI installed but no API key | Warn the user but still set `review.tool` to "codex". |
+| Codex CLI installed | Set `review.tool` to "codex". Codex uses its own auth (`codex auth login`), NOT OPENAI_API_KEY. Do not warn about missing API keys. |
 | Multiple project markers in one directory (e.g., package.json AND *.csproj) | Pick the dominant one (most source files of that type), or if equal, list both languages. |
 | .rival/ directory already exists but no config.json | Treat as fresh init — proceed from Step 3. |
 | Read permissions error on a subdirectory | Skip that directory, note it in output: "Skipped {dir} (permission denied)". |
