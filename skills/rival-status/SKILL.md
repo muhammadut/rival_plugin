@@ -89,13 +89,13 @@ Phase progress mapping:
 - **Knowledge sources:** wiki
 ```
 
-After the project config summary, read `.rival/knowledge/*.md` files and display a knowledge status line:
+After the project config summary, read `.rival/learning/*.md` files and display a knowledge status line:
 
 ```
 Knowledge: Last retro: <date> (<N> patterns, <N> lessons)
 ```
 
-Read `.rival/knowledge/*.md` to get this info. If no knowledge files exist, show:
+Read `.rival/learning/*.md` to get this info. If no knowledge files exist, show:
 ```
 Knowledge: No retros recorded yet.
 ```

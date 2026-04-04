@@ -268,7 +268,7 @@ Agent(
 
 ### 3.2 Load Lessons from Knowledge
 
-Read `.rival/knowledge/codebase-patterns.md` and `.rival/knowledge/lessons-learned.md` if they exist. These contain lessons from past workstreams that should inform this plan.
+Read `.rival/learning/codebase-patterns.md` and `.rival/learning/lessons-learned.md` if they exist. These contain lessons from past workstreams that should inform this plan.
 
 Note any relevant lessons for later synthesis.
 
@@ -398,7 +398,7 @@ Write `.rival/workstreams/<id>/plan.md` with this EXACT structure:
 - Connected repos: <list of repos discovered via dependency tracing>
 - Total indexed repos: <N> (available if needed)
 - Review: <Codex reviewed / Claude reviewed / not reviewed (LIGHT)>
-- Lessons applied: <list of lessons from .rival/knowledge/ that were relevant, or "None — first workstream">
+- Lessons applied: <list of lessons from .rival/learning/ that were relevant, or "None — first workstream">
 
 ## System Map
 <For MEDIUM/LARGE: Mermaid diagram showing how repos/services connect
@@ -410,7 +410,7 @@ Include source URLs. Organized by relevance to the plan.
 For LIGHT: skip.>
 
 ## Lessons from Past Workstreams
-<Any relevant entries from .rival/knowledge/*.md.
+<Any relevant entries from .rival/learning/*.md.
 "None — first workstream" if empty.>
 
 ## Current State
@@ -477,7 +477,7 @@ When synthesizing the plan:
 - Account for blast radius from security-analyzer
 - Follow codebase patterns from pattern-detector
 - Include security mitigations from security-analyzer
-- Apply relevant lessons from .rival/knowledge/
+- Apply relevant lessons from .rival/learning/
 - If DDD framework was loaded, align with bounded context boundaries
 - Cross-repo changes: modify shared-models/contracts first, then consumers
 

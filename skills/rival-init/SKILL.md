@@ -538,7 +538,7 @@ Display a summary box adapted to actual detected values:
 | Experts: azure, ef-core, service-bus, apim            |
 | Review: Codex CLI (gpt-5.4)                           |
 | DevOps: Azure DevOps (PAT configured)                 |
-| Knowledge: .rival/knowledge/ (empty, will grow)       |
+| Knowledge: .rival/learning/ (empty, will grow)       |
 +======================================================+
 ```
 
@@ -550,7 +550,7 @@ Adapt every line to actual values:
 - **Experts** — comma-separated list from `experts` array.
 - **Review** — if Codex: "Codex CLI (v{version})". If fallback: "Built-in skeptical reviewer (no Codex)". Do NOT show OPENAI_API_KEY warnings.
 - **DevOps** — if configured: "Azure DevOps (PAT configured)". If not: "Not configured (add .env to enable)".
-- **Knowledge** — always ".rival/knowledge/ (empty, will grow)".
+- **Knowledge** — always ".rival/learning/ (empty, will grow)".
 
 Then suggest the next step:
 

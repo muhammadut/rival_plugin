@@ -35,8 +35,8 @@ Gather every artifact produced during the workstream:
 
 Also read any existing knowledge files so you can detect duplicates:
 
-- `.rival/knowledge/codebase-patterns.md`
-- `.rival/knowledge/lessons-learned.md`
+- `.rival/learning/codebase-patterns.md`
+- `.rival/learning/lessons-learned.md`
 
 If knowledge files do not exist yet, that is fine — they will be created in Step 4.
 
@@ -71,15 +71,15 @@ How well agents performed during this workstream. This is informational and does
 
 ## Step 4: Update Knowledge Files
 
-Create the `.rival/knowledge/` directory if it does not exist:
+Create the `.rival/learning/` directory if it does not exist:
 
 ```
-mkdir -p .rival/knowledge
+mkdir -p .rival/learning
 ```
 
 ### Update `codebase-patterns.md`
 
-Append new codebase patterns to `.rival/knowledge/codebase-patterns.md`.
+Append new codebase patterns to `.rival/learning/codebase-patterns.md`.
 
 If the file does not exist, create it with this header:
 
@@ -102,7 +102,7 @@ Updated by workstream: <id>
 
 ### Update `lessons-learned.md`
 
-Append new lessons to `.rival/knowledge/lessons-learned.md`.
+Append new lessons to `.rival/learning/lessons-learned.md`.
 
 If the file does not exist, create it with this header:
 

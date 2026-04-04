@@ -51,8 +51,8 @@ Check for and read (if they exist):
 - `.rival/workstreams/<id>/plan.md` — the self-contained plan (includes research findings, review notes, and full task breakdown)
 - `.rival/workstreams/<id>/build-log.md` — build progress
 - `.rival/workstreams/<id>/verification.md` — verification results
-- `.rival/knowledge/codebase-patterns.md` — persistent patterns learned across workstreams
-- `.rival/knowledge/lessons-learned.md` — persistent lessons learned from past workstreams
+- `.rival/learning/codebase-patterns.md` — persistent patterns learned across workstreams
+- `.rival/learning/lessons-learned.md` — persistent lessons learned from past workstreams
 
 Note which artifacts exist — this tells you how far along the workstream is.
 
@@ -254,7 +254,7 @@ User specified a topic. Generate a focused explanation for just that topic:
 | `decisions` | Review decisions and trade-offs explained from the Review Notes in plan.md |
 | `progress` | Build progress, what's done, what's next |
 | `research` | What industry best practices were found and how they influenced the plan |
-| `lessons` | What was learned from past workstreams via .rival/knowledge/ |
+| `lessons` | What was learned from past workstreams via .rival/learning/ |
 
 ### Mode C: Q&A Mode
 
