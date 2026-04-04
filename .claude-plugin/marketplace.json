@@ -4,7 +4,7 @@
     "name": "muhammadut"
   },
   "metadata": {
-    "description": "Two-AI development workflow: Claude plans and builds, Gemini reviews."
+    "description": "Production-grade development workflow with research, adversarial review, and cross-workstream learning."
   },
   "plugins": [
     {
@@ -13,10 +13,10 @@
         "source": "github",
         "repo": "muhammadut/rival_plugin"
       },
-      "description": "Two-AI development workflow with 5-phase process and human approval gates.",
-      "version": "0.2.0",
+      "description": "Research-backed planning, parallel execution, adversarial review (Codex/Claude), persistent lessons learned. Multi-repo support.",
+      "version": "1.0.0",
       "license": "MIT",
-      "keywords": ["workflow", "gemini", "review", "planning", "architecture"]
+      "keywords": ["workflow", "codex", "review", "planning", "multi-repo", "research", "learning"]
     }
   ]
 }
