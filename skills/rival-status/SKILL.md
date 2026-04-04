@@ -86,8 +86,9 @@ Phase progress mapping:
 - **Type:** brownfield
 - **Stack:** TypeScript / Express / Jest / Prisma / Node
 - **Frameworks:** C4, DDD, BDD
-- **Gemini CLI:** ✓ Available
-- **Serena:** ✗ Not available
+- **Codex CLI:** ✓ Available
+- **Repos:** 4 (this + 3 related)
+- **Experts:** azure, ef-core, service-bus
 ```
 
 After the project config summary, read `.rival/knowledge/*.md` files and display a knowledge status line:

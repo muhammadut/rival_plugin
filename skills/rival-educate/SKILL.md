@@ -168,7 +168,7 @@ send regardless of user preferences.">
 ```markdown
 ## What the Reviewer Found
 
-<State the reviewer (Gemini/Claude), their independence from
+<State the reviewer (Codex/Claude skeptical-reviewer), their independence from
 the planning phase, and the summary of findings.>
 
 ### Accepted Critiques
