@@ -1,13 +1,13 @@
 ---
 name: rival-plan
-description: Plan a feature. Explores codebase with sub-agents, gathers context, creates implementation plan.
+description: Plan a feature. Researches best practices, explores codebase, synthesizes self-contained execution plan with auto-review.
 user-invocable: true
-argument-hint: <feature-description>
+argument-hint: <feature-description> [--light] [--discussion]
 ---
 
-# Rival Plan — Context Gathering + Planning Orchestrator
+# Rival Plan — Research + Analysis + Planning Orchestrator
 
-You are the Rival planning orchestrator. Your job is to explore the codebase using specialized sub-agents, gather precise context, and produce a high-level implementation plan with a context briefing. You run inline in the current conversation — you ARE Claude talking to the user.
+You are the Rival planning orchestrator. Your job is to research best practices, explore the codebase using specialized sub-agents, and produce a **self-contained execution plan** that a fresh-context Claude Code instance can read and execute without any prior conversation. You run inline in the current conversation — you ARE Claude talking to the user.
 
 ## Phase 1: Initialization
 
@@ -19,35 +19,31 @@ Read `.rival/config.json`. If it doesn't exist, stop and tell the user:
 Store the config values — you'll need them throughout:
 - `project_type` (brownfield/greenfield)
 - `stack` (language, framework, test_framework, orm, runtime)
-- `frameworks` (array of enabled framework names)
-- `gemini_available`, `serena_available`
+- `repos` (array of {name, path, role, source})
+- `experts` (array of expert domain strings)
+- `review.tool` (codex/skeptical-reviewer), `review.fallback`
 
 ### 1.2 Parse Arguments
 
 The input comes from `$ARGUMENTS`. Parse it for:
 - **Feature description:** The main text (everything that isn't a flag)
-- **`--comprehensive` flag:** If present, enable comprehensive mode (Gemini reviews each agent's output)
+- **`--light` flag:** Minimal analysis, no research, no auto-review
+- **`--discussion` flag:** Research only, no execution plan, architecture exploration
 
 Examples:
-- `Add OAuth2 authentication` → feature: "Add OAuth2 authentication", comprehensive: false
-- `Add OAuth2 authentication --comprehensive` → feature: "Add OAuth2 authentication", comprehensive: true
-- `--comprehensive Add OAuth2 authentication` → same as above
+- `Add async carrier callbacks` → feature, mode: standard
+- `Fix null ref in QuotationValidator.cs line 47 --light` → feature, mode: light
+- `Should we use Event Sourcing for billing? --discussion` → feature, mode: discussion
 
-If the feature description is empty (only flags or nothing), ask the user: "What feature do you want to plan?"
-
-If `--comprehensive` is set but `gemini_available` is false in config, warn:
-> "The `--comprehensive` flag requires Gemini CLI. Install it with `npm install -g @google/gemini-cli`, then re-run `/rival:rival-init` to detect it. Proceeding in standard mode."
-
-Store both the feature description and comprehensive flag for use throughout.
+If the feature description is empty, ask the user: "What feature do you want to plan?"
 
 ### 1.3 Generate Workstream ID
 
-Create a workstream identifier:
 1. Take the first 3-4 significant words from the feature description
 2. Slugify them (lowercase, hyphens, remove special chars)
 3. Append the date as YYYYMMDD
 
-Example: "Add OAuth2 authentication" → `oauth2-authentication-20260214`
+Example: "Add async carrier callbacks" → `async-carrier-callbacks-20260403`
 
 ### 1.4 Workstream Resolution
 
@@ -55,30 +51,28 @@ Check `.rival/workstreams/` for existing workstreams:
 
 Use Glob to scan: `.rival/workstreams/*/state.json`
 
-For each state.json found, read it and check:
+For each state.json found, check:
 - Is there an active (non-archived) workstream with a similar feature description?
 - If yes, offer the user a choice:
-  > "There's an existing workstream '**oauth2-auth-20260210**' at phase **plan-approved** for a similar feature: 'Add OAuth2 login'. Do you want to:
+  > "There's an existing workstream '**<id>**' at phase **<phase>** for: '<feature>'.
   > 1. Continue that workstream
   > 2. Start fresh (archives the old one)"
-
-- If continuing: load that workstream and resume from its current phase.
-- If starting fresh or no match: create the new workstream directory.
 
 ### 1.5 Create Workstream
 
 Create the workstream directory and initial state:
 
-```
-.rival/workstreams/<id>/state.json
+```bash
+mkdir -p .rival/workstreams/<id>
 ```
 
+Write `.rival/workstreams/<id>/state.json`:
 ```json
 {
   "id": "<workstream-id>",
-  "feature": "<feature description from user>",
+  "feature": "<feature description>",
   "phase": "planning",
-  "comprehensive": false,
+  "mode": "standard|light|discussion",
   "created": "<ISO timestamp>",
   "history": [
     { "phase": "planning", "timestamp": "<ISO timestamp>" }
@@ -86,419 +80,476 @@ Create the workstream directory and initial state:
 }
 ```
 
-Set `comprehensive` to `true` if the `--comprehensive` flag was provided.
-
-Also create the agent-drafts directory if comprehensive mode is enabled:
-`.rival/workstreams/<id>/agent-drafts/` — this is where agents write their draft outputs
-and Gemini review JSONs during comprehensive mode.
-
 Tell the user:
 > "Starting planning for: **<feature>**
 > Workstream: `<id>`"
 
-## Phase 2: Dynamic Triage
+## Phase 2: Inline Triage
 
-Before spawning agents, run the triage agent to classify the task and select relevant frameworks.
+Classify the task directly — no separate triage agent needed with 1M context.
 
-### 2.1 Resolve Available Frameworks
+### 2.1 Classification
 
-Gather the full list of available frameworks:
-1. Read `config.frameworks` for the list of enabled framework names
-2. For each name, check for the framework file in this order:
-   - `.rival/frameworks/<name>.md` (project-local custom framework — takes priority)
-   - `${CLAUDE_PLUGIN_ROOT}/frameworks/<name>.md` (bundled with plugin)
-3. Also scan `.rival/frameworks/` for any additional `.md` files not already in the config list — these are custom frameworks the team may have added after init
+Assess the feature request against these criteria:
 
-### 2.2 Run Triage Agent
+| Category | Criteria | What Happens |
+|----------|---------|-------------|
+| **LIGHT** | Single file fix, simple bug, small refactor. `--light` flag used. | Minimal scan, quick plan, no research, no auto-review |
+| **MEDIUM** | Single-repo feature, moderate scope, 3-10 files | Full research, focused analysis, full plan, auto-review |
+| **LARGE** | Cross-repo, new subsystems, >10 files, architectural changes | Deep research + expert research, comprehensive analysis, detailed plan with diagrams, auto-review |
+| **DISCUSSION** | Questions about architecture, pros/cons, no implementation. `--discussion` flag. | Research only, comparison document, no execution plan, no auto-review |
 
-Spawn the triage agent:
+Override rules:
+- `--light` flag forces LIGHT regardless of complexity (but warn if task looks larger)
+- `--discussion` flag forces DISCUSSION
+
+### 2.2 Framework Doc Selection
+
+With 1M context, you (the main agent) can read 2-3 framework docs directly. Decide which are relevant:
+- New entities/domain concepts → read `frameworks/ddd.md` (use `${CLAUDE_PLUGIN_ROOT}/frameworks/ddd.md`)
+- Architectural changes → read `frameworks/c4-model.md`
+- Event flows or async patterns → read `frameworks/event-storming.md`
+- User-facing feature → read `frameworks/bdd.md`
+- Custom framework docs in `.rival/frameworks/` take priority over bundled
+
+Read the relevant framework files now. You'll use them during synthesis.
+
+### 2.3 Present Triage
+
+Show the triage result to the user with option to override:
 
 ```
-Task(
-  subagent_type="rival:triage-agent",
-  description="Triage: <feature short name>",
-  prompt="
-    ## Feature Request
-    <feature description>
+Triage: MEDIUM — single-repo feature, ~6 files affected
+Research: industry patterns + azure (from experts)
+Analysis: code-explorer (MEDIUM) + security-analyzer + pattern-detector
+Framework docs: DDD (new domain entities detected)
 
-    ## Available Frameworks
-    <list of all available framework names from step 2.1>
-
-    ## Project Type
-    <brownfield/greenfield>
-
-    ## Stack
-    <language, framework, test_framework, orm, runtime>
-
-    Classify this task and recommend which frameworks to use.
-  "
-)
+[Accept] [Upgrade to LARGE] [Downgrade to LIGHT]
 ```
 
-### 2.3 Present Triage Decision
+If the user overrides, adjust all subsequent phases accordingly.
 
-Show the user what the triage agent decided and let them override:
-
-> "**Task analysis:**
-> Size: **MEDIUM** — extends existing feature, ~5 files affected
->
-> **Agents I'll run:**
-> - Code Explorer, Impact Analyzer, Pattern Detector, Security Analyzer (always-on)
-> - **DDD Modeler** — this task introduces new domain entities
-> - **BDD Writer** — user-facing feature needs acceptance criteria
->
-> **Skipping:** C4 (no architectural changes), Event Storming (no event flows), ADR (following existing patterns), TDD (will apply during build phase)
->
-> [Accept] [Add more frameworks] [Go minimal] [Go full]"
-
-- **Accept**: Use the triage recommendation
-- **Add more frameworks**: Let user add specific frameworks
-- **Go minimal**: Only safety layer agents, skip all framework agents
-- **Go full**: Run all available framework agents regardless of triage
-
-If `--comprehensive` is active, also mention it:
-> "**Mode: Comprehensive** — each agent's output will be independently reviewed by Gemini 3 Pro before synthesis. This takes longer but produces higher-quality analysis."
-
-Store the triage decision in `state.json` under a `triage` field for transparency:
+Store the triage in state.json:
 ```json
 {
   "triage": {
     "size": "MEDIUM",
-    "selected_frameworks": ["ddd", "bdd"],
-    "skipped_frameworks": ["c4", "event-storming", "adr", "tdd"],
-    "override": "none",
-    "comprehensive": true
+    "research_plan": ["industry", "azure"],
+    "agents": ["code-explorer", "pattern-detector", "security-analyzer"],
+    "framework_docs": ["ddd"],
+    "override": "none"
   }
 }
 ```
 
-## Phase 3: Agent Selection
+## Phase 3: Research Phase (MEDIUM + LARGE only)
 
-Based on the triage decision (not the full config), determine which agents to spawn.
+Skip entirely for LIGHT. For DISCUSSION: research only, skip Phase 4.
 
-### Batch 1 — Parallel (no dependencies between them)
-
-| Agent | Condition | Always? |
-|-------|-----------|---------|
-| `code-explorer` | Always | Yes |
-| `pattern-detector` | `project_type == "brownfield"` | Yes (brownfield) |
-| `c4-mapper` | `"c4"` selected by triage | No |
-| `ddd-modeler` | `"ddd"` selected by triage | No |
-| `event-storm-mapper` | `"event-storming"` selected by triage | No |
-
-For any custom frameworks selected by triage: if a corresponding agent exists in `agents/`,
-spawn it. If no agent exists (custom framework with no custom agent), the framework file
-will still be read and included in the synthesis phase as reference material.
-
-### Batch 2 — Sequential (depends on Batch 1 results)
-
-| Agent | Condition | Depends On |
-|-------|-----------|------------|
-| `impact-analyzer` | `project_type == "brownfield"` | code-explorer results |
-| `security-analyzer` | Always | code-explorer results + ddd-modeler results (if available) |
-
-## Phase 4: Execute Batch 1 (Parallel)
-
-For each agent selected in Batch 1, build a task prompt and spawn via the Task tool.
-
-### Building Agent Task Prompts
-
-Each agent prompt is assembled from these parts:
-1. **Agent instructions** — the agent's defined behavior (the agent is registered as `rival:<agent-name>`)
-2. **Feature context** — the user's feature request
-3. **Project context** — stack info from config
-4. **Framework reference** — if this is a framework agent, read the corresponding framework file. Check `.rival/frameworks/<name>.md` first (project-local), then fall back to `${CLAUDE_PLUGIN_ROOT}/frameworks/<name>.md` (bundled)
-
-### Prompt Template for Each Agent
+### 3.1 Spawn Research Agents in Parallel
 
 ```
-## Feature Request
-<feature description>
+Agent(
+  subagent_type="rival:researcher",
+  description="Research: <feature short name>",
+  prompt="
+    ## Feature Request
+    <feature description>
 
-## Project Context
-- Project type: <brownfield/greenfield>
-- Language: <language>
-- Framework: <framework>
-- Test framework: <test_framework>
-- ORM: <orm>
-- Runtime: <runtime>
+    ## Stack
+    <language, framework, test_framework, orm, runtime>
 
-## Serena Availability
-<serena_available: true/false>
-If Serena tools are available, prefer them for code analysis. Otherwise use Grep/Read.
+    ## Expert Domains
+    <list from config.experts>
 
-<For framework agents only:>
-## Framework Reference
-<content of frameworks/<name>.md>
-
-## Your Task
-<specific instructions for this agent based on the feature request>
-Analyze the codebase and return your findings in your defined output format.
-
-<If --comprehensive mode is enabled, APPEND this block:>
-## Comprehensive Mode: ENABLED — Gemini Independent Review
-
-After you complete your analysis but BEFORE returning your final output, you must get
-an independent review from Gemini. This ensures a second model validates your findings
-against the actual codebase.
-
-### Steps:
-
-1. **Write your draft output** to a temporary file:
-   Use Bash: `cat > .rival/workstreams/<workstream-id>/agent-drafts/<your-agent-name>-draft.md << 'DRAFT_EOF'`
-   <your complete draft output>
-   `DRAFT_EOF`
-
-2. **Invoke Gemini 3 Pro** to review your draft:
-   ```bash
-   gemini --model gemini-3-pro-preview \
-     -p "You are reviewing a code analysis produced by another AI agent for the feature: '<feature description>'.
-
-   The agent's role was: <your role description>.
-
-   ## Agent's Draft Analysis
-   $(cat .rival/workstreams/<workstream-id>/agent-drafts/<your-agent-name>-draft.md)
-
-   ## Your Task
-   You are a skeptical senior engineer. Independently explore the codebase to verify
-   the agent's findings. Check:
-   1. Are the claimed files and symbols accurate? Read them yourself.
-   2. Did the agent miss anything important?
-   3. Are there incorrect assumptions or hallucinations?
-   4. What would you add or change?
-
-   Return a structured review:
-   ### Verified Findings (what the agent got right)
-   ### Corrections (what the agent got wrong, with evidence)
-   ### Additions (what the agent missed, with evidence)
-   ### Overall Assessment (1-2 sentences)" \
-     --include-directories . \
-     <if serena_available: --allowed-mcp-server-names serena> \
-     --yolo \
-     --output-format json \
-     > .rival/workstreams/<workstream-id>/agent-drafts/<your-agent-name>-gemini-review.json
-   ```
-
-3. **Read Gemini's review:**
-   Read the JSON file. The review text is in the `.response` field.
-
-4. **Incorporate valid feedback:**
-   - For each **Correction**: verify Gemini's evidence. If correct, fix your output.
-   - For each **Addition**: if supported by evidence, add it to your output.
-   - Do NOT blindly accept everything — verify Gemini's claims too.
-
-5. **Return your refined output** with a brief note at the end:
-   ```
-   ---
-   _Comprehensive mode: This analysis was independently reviewed by Gemini 3 Pro.
-   Gemini verified N findings, corrected M items, and added K new findings._
-   ```
-
-### If Gemini invocation fails:
-Return your original draft output with a note: "Comprehensive review attempted but
-Gemini invocation failed. Returning unreviewed analysis."
-Do NOT block on Gemini failure — your analysis is still valuable.
+    Research industry best practices for this type of feature in this stack.
+  "
+)
 ```
 
-### Spawning Agents
-
-Spawn ALL Batch 1 agents in parallel using the Task tool:
-
+For each relevant expert domain, also spawn:
 ```
-Task(
+Agent(
+  subagent_type="rival:expert-researcher",
+  description="Expert: <domain>",
+  prompt="
+    ## Feature Request
+    <feature description>
+
+    ## Expert Domain
+    <domain name>
+
+    ## Stack
+    <language, framework>
+
+    Research this specific domain's documentation, patterns, and limits.
+  "
+)
+```
+
+**IMPORTANT:** Launch ALL research agents in a SINGLE message so they run in parallel.
+
+### 3.2 Load Lessons from Knowledge
+
+Read `.rival/knowledge/codebase-patterns.md` and `.rival/knowledge/lessons-learned.md` if they exist. These contain lessons from past workstreams that should inform this plan.
+
+Note any relevant lessons for later synthesis.
+
+### 3.3 Collect Research Results
+
+Gather all research agent results. Store a summary in the workstream directory:
+`.rival/workstreams/<id>/research-summary.md`
+
+For DISCUSSION mode: skip to Phase 6.5 (present discussion document instead of plan).
+
+## Phase 4: Codebase Analysis Phase
+
+What gets spawned depends on triage size:
+
+| Agent | LIGHT | MEDIUM | LARGE |
+|-------|-------|--------|-------|
+| code-explorer | LIGHT budget | MEDIUM budget | LARGE budget |
+| pattern-detector | skip | MEDIUM budget | LARGE budget |
+| security-analyzer | skip | after code-explorer | after code-explorer |
+
+### 4.1 Batch 1 — Parallel Agents
+
+Spawn agents that have no dependencies on each other:
+
+**Code Explorer** (all sizes):
+```
+Agent(
   subagent_type="rival:code-explorer",
-  description="Code Explorer: <feature short name>",
-  prompt=<assembled prompt>
-)
+  description="Explore: <feature short name>",
+  prompt="
+    ## Feature Request
+    <feature description>
 
-Task(
+    ## Repos
+    <JSON array of repos from config>
+
+    ## Budget
+    <LIGHT|MEDIUM|LARGE>
+
+    Find all relevant code, symbols, and gaps across all repos.
+  "
+)
+```
+
+**Pattern Detector** (MEDIUM + LARGE only):
+```
+Agent(
   subagent_type="rival:pattern-detector",
-  description="Pattern Detector: <feature short name>",
-  prompt=<assembled prompt>
+  description="Patterns: <feature short name>",
+  prompt="
+    ## Feature Request
+    <feature description>
+
+    ## Repos
+    <JSON array of repos from config>
+
+    ## Budget
+    <MEDIUM|LARGE>
+
+    Detect codebase conventions and patterns across all repos.
+  "
 )
-
-... (other Batch 1 agents as applicable)
 ```
 
-**IMPORTANT:** Launch all Batch 1 agents in a SINGLE message with multiple Task tool calls so they run in parallel.
+Launch Batch 1 agents in a SINGLE message (parallel).
 
-Collect all results when they complete.
+### 4.2 Batch 2 — Depends on Batch 1
 
-## Phase 5: Execute Batch 2 (Sequential)
+After code-explorer completes, spawn:
 
-After Batch 1 completes, build Batch 2 prompts that INCLUDE Batch 1 results.
-
-### Impact Analyzer Prompt (brownfield only)
-
-Add to the base prompt:
+**Security + Impact Analyzer** (MEDIUM + LARGE only):
 ```
-## Code Explorer Results
-<paste full code-explorer output here>
+Agent(
+  subagent_type="rival:security-analyzer",
+  description="Security: <feature short name>",
+  prompt="
+    ## Feature Request
+    <feature description>
 
-Analyze the dependencies and blast radius for these symbols and files.
-```
+    ## Repos
+    <JSON array of repos from config>
 
-### Security Analyzer Prompt
+    ## Code Explorer Results
+    <paste full code-explorer output>
 
-Add to the base prompt:
-```
-## Code Explorer Results
-<paste full code-explorer output here>
-
-<if DDD results available:>
-## DDD Model Results
-<paste ddd-modeler output here>
-
-Analyze security risks considering the domain model and identified code.
+    Trace blast radius and identify security risks.
+  "
+)
 ```
 
-Spawn Batch 2 agents. Impact Analyzer and Security Analyzer can run in parallel since they both depend on Batch 1 but not on each other.
+## Phase 5: Plan Synthesis
 
-Collect results.
+You now have results from research agents (if MEDIUM/LARGE), code analysis agents, and knowledge files. Synthesize everything into the self-contained plan document.
 
-## Phase 6: Synthesis
+### 5.1 Read Framework Docs (if selected in triage)
 
-You now have results from all agents. Synthesize them into two artifacts.
+If you haven't already, read the relevant framework reference docs from `${CLAUDE_PLUGIN_ROOT}/frameworks/`. Use their guidance to inform the plan structure.
 
-### 5.1 Context Briefing
+### 5.2 Write the Plan Document
 
-Write `.rival/workstreams/<id>/context-briefing.md`:
+Write `.rival/workstreams/<id>/plan.md` with this EXACT structure:
 
 ```markdown
-# Context Briefing: <Feature Name>
-Generated: <timestamp>
-Workstream: <id>
+# Execution Plan: <Feature Name>
 
-## Feature Request
-<original feature description>
+## Metadata
+- Workstream: <id>
+- Created: <timestamp>
+- Size: LIGHT | MEDIUM | LARGE
+- Repos: <list of repos involved, with roles>
+- Review: <Codex reviewed / Claude reviewed / not reviewed (LIGHT)>
+- Lessons applied: <list of lessons from .rival/knowledge/ that were relevant, or "None — first workstream">
 
-## Project Stack
-<language, framework, test framework, orm, runtime>
+## System Map
+<For MEDIUM/LARGE: Mermaid diagram showing how repos/services connect
+and which parts are affected. For LIGHT: skip this section.>
 
-## What Exists
+## Research Findings
+<For MEDIUM/LARGE: Key findings from researcher + expert-researcher.
+Include source URLs. Organized by relevance to the plan.
+For LIGHT: skip.>
 
-### Relevant Code
-<from Code Explorer: symbols found, files involved>
+## Lessons from Past Workstreams
+<Any relevant entries from .rival/knowledge/*.md.
+"None — first workstream" if empty.>
 
-### Architecture
-<from C4 Mapper if available: current system at relevant C4 levels>
+## Current State
+<For each affected file: repo, path, relevant code snippet showing BEFORE state.
+Use code blocks with language tags.
+For files being created, note "does not exist yet.">
 
-### Domain Model
-<from DDD Modeler if available: bounded contexts, aggregates, entities>
+## Target State
+<For each affected file: what the code should look like AFTER implementation.
+Include actual code or clear pseudocode.
+For architectural changes, include Mermaid diagram showing target architecture.>
 
-### Event Flows
-<from Event Storm Mapper if available: event chains>
-
-## Patterns & Conventions
-<from Pattern Detector if available: patterns to follow, anti-patterns to avoid>
-
-## Impact Analysis
-<from Impact Analyzer if available: blast radius, files that will change, files that might break>
-
-## Security Considerations
-<from Security Analyzer: risks rated by severity, mitigations>
-
-## Gaps
-<from Code Explorer: what doesn't exist yet that needs to be created>
-```
-
-### 5.2 Implementation Plan
-
-Write `.rival/workstreams/<id>/plan.md`:
-
-```markdown
-# Implementation Plan: <Feature Name>
-Generated: <timestamp>
-Workstream: <id>
-
-## Summary
-<1-2 paragraph overview of the approach>
-
-## Approach
-<High-level architectural approach, explaining WHY this approach was chosen>
-
-## Risk Assessment
-<Key risks identified, with mitigations from security analyzer and impact analyzer>
+## Review Notes
+<Auto-review findings that were ACCEPTED, incorporated into the plan.
+Rejected items listed with reasoning.
+For LIGHT: "Not reviewed (light mode).">
 
 ## Implementation Phases
 
 ### Phase 1: <name>
-<Description of what this phase accomplishes>
+**Repos:** <which repos this phase touches>
+**Gate:** <test command to run after this phase>
 
-- [ ] Task 1.1: <description>
-  - Files: <files to create or modify>
-  - Risk: <LOW/MEDIUM/HIGH>
-- [ ] Task 1.2: <description>
-  - Files: <files to create or modify>
-  - Risk: <LOW/MEDIUM/HIGH>
+#### Task 1.1: <description>
+- **Repo:** <repo-name>
+- **Action:** CREATE | MODIFY
+- **Files:** <list with full relative paths within repo>
+- **What to do:** <specific, unambiguous instructions>
+- **Before:** <current code, if MODIFY> (or "N/A — new file")
+- **After:** <target code or clear pseudocode>
+- **Tests:** <specific tests to write or run>
+- **Effects:** <what other files/services this change impacts>
 
-### Phase 2: <name>
+#### Task 1.2: <description>
 ...
 
-## Test Strategy
-<High-level test approach — details will be refined in blueprint phase>
+### Phase 2: <name>
+**Repos:** ...
+**Gate:** ...
+...
 
-## Open Questions
-<Anything that needs clarification before proceeding>
+## Validation Plan
+<End-to-end verification steps. What commands to run across all repos.
+Integration test scenarios if applicable.>
+
+## Risks & Mitigations
+<Specific risks with severity and concrete mitigations.
+Not generic — tied to actual files and code.>
 ```
 
-**Planning principles:**
+**Why this format works for fresh-context execution:**
+- System Map tells the orchestrator how repos connect
+- Current State shows exactly what exists now (no need to re-explore)
+- Target State shows exactly what to build
+- Each task has Before/After code — sub-agents don't need to explore
+- Phase gates tell the orchestrator what to run between phases
+- Validation plan covers end-to-end verification
+
+### 5.3 Planning Principles
+
+When synthesizing the plan:
 - Order tasks to minimize breakage (safe changes first, risky changes later)
 - Each task should be atomic and independently testable where possible
-- Account for blast radius from impact analysis
-- Include security mitigations from security analysis
-- Follow codebase patterns from pattern detection
-- If DDD is enabled, align implementation with bounded context boundaries
-- If C4 is enabled, note which C4 level each phase operates at
+- Account for blast radius from security-analyzer
+- Follow codebase patterns from pattern-detector
+- Include security mitigations from security-analyzer
+- Apply relevant lessons from .rival/knowledge/
+- If DDD framework was loaded, align with bounded context boundaries
+- Cross-repo changes: modify shared-models/contracts first, then consumers
+
+## Phase 6: Auto-Review (MEDIUM + LARGE only)
+
+Skip for LIGHT. After writing the plan, automatically review it.
+
+### 6.1 Path A — Codex Available
+
+If `review.tool == "codex"` in config:
+
+```bash
+codex exec "You are reviewing an implementation plan. Verify it against the actual codebase.
+
+## Plan to Review
+$(cat .rival/workstreams/<id>/plan.md)
+
+## Your Task
+1. Read the actual files referenced in the plan — verify they exist and match the 'Before' code
+2. Check for missed files or dependencies
+3. Check for security issues in the approach
+4. Check that the phase ordering makes sense
+5. Flag any incorrect assumptions
+
+Return:
+### Verdict: APPROVED | NEEDS REVISION
+### Issues (for each):
+  - Severity: HIGH | MEDIUM | LOW
+  - Issue: <description>
+  - Evidence: <file:line reference>
+  - Suggestion: <fix>" \
+  --full-auto \
+  -o .rival/workstreams/<id>/review-raw.md
+```
+
+**Do NOT set a timeout on Codex.** Let it run as long as it needs. Codex can take several minutes for thorough reviews; this is expected.
+
+### 6.2 Path B — Codex Unavailable
+
+If Codex is not available or not configured:
+
+```
+Agent(
+  subagent_type="rival:skeptical-reviewer",
+  description="Plan Review: <feature>",
+  prompt="
+    ## Artifacts to Review
+    <paste plan.md content>
+
+    ## Codebase Access
+    Working directory: <project root>
+
+    Review this implementation plan adversarially. Verify every claim
+    by reading actual code.
+  "
+)
+```
+
+### 6.3 Path C — Codex Fails
+
+If Codex process crashes or returns an error (NOT a timeout — never timeout Codex):
+Fall back to Path B. Warn user:
+> "Codex CLI failed. Falling back to Claude skeptical-reviewer for plan review."
+
+### 6.4 Process Review Results
+
+After review completes:
+1. Read the review output
+2. For each finding, evaluate:
+   - **ACCEPT**: Evidence is valid → update plan.md to incorporate the fix
+   - **REJECT**: Evidence is wrong or finding is out of scope → note rejection with reasoning
+3. Update the "## Review Notes" section of plan.md with all accepted/rejected items
+4. Write review decisions to `.rival/workstreams/<id>/review-decisions.md`
+
+### 6.5 Discussion Mode Output (--discussion only)
+
+For DISCUSSION mode, skip the plan document. Instead, present a comparison document:
+
+```markdown
+# Analysis: <Question>
+
+## Research Findings
+<organized findings from research agents>
+
+## Options
+### Option 1: <name>
+- How: <approach>
+- Pros: <list>
+- Cons: <list>
+- Effort: <LOW/MEDIUM/LARGE>
+- Cost: <if applicable>
+
+### Option 2: <name>
+...
+
+## Recommendation
+<which option and why, with evidence>
+
+## Sources
+<URLs from research>
+```
+
+Present to user. No approve/execute flow.
 
 ## Phase 7: Human Gate
 
-After writing both files, update state:
+Present the plan to the user with:
+1. Summary of findings (research highlights, key risks)
+2. Plan overview (phases, task count, repos affected)
+3. Review results (if applicable)
 
-```json
-{
-  "phase": "plan-ready",
-  "history": [..., { "phase": "plan-ready", "timestamp": "<now>" }]
-}
+```
+Plan ready. Workstream: <id>
+
+Summary:
+- Researched: <key findings>
+- Analyzed: <N> files across <N> repos
+- Plan: <N> phases, <N> tasks
+- Review: <verdict> (<N> items accepted, <N> rejected)
+- Lessons applied: <N> from past workstreams
+
+Key risks:
+1. <risk 1>
+2. <risk 2>
+
+What would you like to do?
+1. Approve — proceed to execution
+2. Revise — tell me what to change
+3. Reject — start over
 ```
 
-Present the plan to the user. Show:
-1. A summary of what was found (key findings from each agent)
-2. The implementation plan overview
-3. Key risks and mitigations
+On **Approve**: Update state to `plan-approved`.
+```
+Plan approved. To execute:
+1. Clear your context (Ctrl+L or start a new session)
+2. Run /rival:execute
+   OR /rival:execute <workstream-name> if you have multiple workstreams
 
-Then ask for approval:
+The plan is fully self-contained — the executor needs no prior context.
+```
 
-> "**Plan is ready for review.**
->
-> I explored the codebase with <N> specialized agents<if comprehensive: , each independently verified by Gemini 3 Pro,> and found <key highlights>.
->
-> The plan has <N phases> with <N tasks> total.
->
-> **Key risks:**
-> - <top 2-3 risks>
->
-> You can review the full plan at `.rival/workstreams/<id>/plan.md`
-> and the context briefing at `.rival/workstreams/<id>/context-briefing.md`.
->
-> **What would you like to do?**
-> 1. **Approve** — proceed to adversarial review
-> 2. **Revise** — tell me what to change
-> 3. **Reject** — start over with a different approach"
+On **Revise**: Discussion loop — update plan.md with changes, re-present.
 
-On **Approve**: Update state to `plan-approved`, add history entry.
-> "Plan approved. Next step: `/rival:rival-review` to get adversarial review from Gemini."
+On **Reject**: Reset state to `planning`, ask for new direction.
 
-On **Revise**: Discuss changes, update plan.md and context-briefing.md, re-present for approval.
+## Edge Cases
 
-On **Reject**: Update state to `planning`, ask for new direction.
+| Edge Case | What Happens |
+|-----------|-------------|
+| `/rival:execute` with no approved plan | "No approved plan found. Run `/rival:plan` first." |
+| `/rival:plan` with no config | "Rival not configured. Run `/rival:init` first." |
+| Codex CLI not installed | Fallback to skeptical-reviewer, warn user |
+| Configured repo path doesn't exist | Warn: "Repo '<name>' not found at path. Skipping." Continue with available repos |
+| Conflicting research results | Plan presents both sides with tradeoffs, doesn't silently pick one |
+| Plan targets an unconfigured repo | "This repo isn't in your config. Want to add it?" |
+| Multiple active workstreams | Ask which one to continue or create new |
+| --light on a complex task | Triage warns: "This looks like a MEDIUM task. Use full mode? [Y/n]" |
+| Two workstreams modify same files | Warn: "Workstream X also modifies <file>. Proceed?" |
+| Research finds no relevant results | Note in plan: "No industry research found for this specific pattern" |
 
 ## Important Notes
 
 - You run INLINE — you are Claude in the current conversation. Do NOT fork context.
 - Sub-agents return their results TO YOU. You synthesize everything.
-- Framework file resolution: check `.rival/frameworks/<name>.md` first (project-local custom), then `${CLAUDE_PLUGIN_ROOT}/frameworks/<name>.md` (bundled). Project-local takes priority so teams can override bundled frameworks.
-- If an agent fails or returns poor results, note it in the context briefing and proceed with what you have.
-- Keep the user informed of progress: "Running triage...", "Launching 5 agents in parallel...", "All agents complete. Synthesizing results..."
-- The plan should be actionable enough for a senior engineer to review, but not so detailed that it becomes the blueprint (that's the blueprint phase).
-- The triage decision is stored in state.json for transparency — users can see why certain frameworks were selected or skipped.
+- The plan document MUST be self-contained. A fresh Claude Code instance with zero context must be able to read plan.md and execute without any other artifacts.
+- Framework file resolution: check `.rival/frameworks/<name>.md` first (project-local custom), then `${CLAUDE_PLUGIN_ROOT}/frameworks/<name>.md` (bundled).
+- If an agent fails or returns poor results, note it in the plan and proceed.
+- Keep the user informed: "Researching...", "Analyzing codebase...", "Writing plan...", "Auto-reviewing..."
+- Never timeout Codex — let it run as long as it needs.
+- The plan replaces the old context-briefing.md + plan.md split. Everything is now in ONE document.
