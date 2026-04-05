@@ -1,51 +1,51 @@
 ---
 name: rival-team-status
-description: Show active PRs, work items, and board activity for a team, member, repo, or board. Queries Azure DevOps via your existing PAT.
+description: Pull team activity from Azure DevOps, then synthesize insightful per-person narrative reports connecting work to system context.
 user-invocable: true
-argument-hint: [--team <name>] [--member <name>] [--repo <name>] [--board <name>] [--me] [--all] [--stale] [--sprint]
+argument-hint: [--team <name>] [--names "..."] [--window <days>] [--refresh-roster]
 ---
 
-# Rival Team Status — Active Work Dashboard
+# Rival Team Status — Insightful Team Activity Reports
 
-Queries Azure DevOps for active PRs and work items, scoped by team, member, repo, or board. Uses your existing ADO PAT from `.env`.
+Two-phase architecture:
+1. **Gather** (Python script): pulls enriched data from Azure DevOps — PR descriptions, changed files, work item details, branches, cross-board work items
+2. **Synthesize** (Claude): reads raw data and writes meaningful narrative reports that connect each person's work to the system
+
+Output: `.team-status/YYYY-MM-DD/report.md` — a briefing, not a list.
 
 ## Process
 
-### Step 1: Parse Arguments
+### Step 1: Check Configuration
 
-From `$ARGUMENTS`:
+Read `.rival/config.json` for:
+- `paths.plugin_root`
+- `paths.python_cmd`
+- `devops.organization` and `devops.project` (must be present)
 
-| Flag | Scope |
-|------|-------|
-| `--me` | Your own PRs/work items (uses git config email) |
-| `--team <name>` | Specific team from `.rival/team.yaml` |
-| `--member <name>` | Specific person (name, devops_id, or email) |
-| `--repo <name>` | Specific repo |
-| `--board <name>` | Specific Azure DevOps board or area path |
-| `--all` | Exhaustive — all teams, all repos, all boards |
-| `--stale` | Only PRs >7 days old with no updates |
-| `--sprint` | Focus on current iteration only |
+If DevOps config missing: "Azure DevOps not configured. Run /rival:rival-init first."
 
-Default (no flags): use `default_team` from `.rival/team.yaml`, or `--all` if no team config.
+Check for `.env` — must contain `ADO_PAT`, `ADO_ORG`, `ADO_PROJECT`.
 
-### Step 2: Check for team.yaml
+### Step 2: Check / Create team.yaml
 
-Read `.rival/team.yaml`. If it doesn't exist, offer to create one:
+Look for `.rival/team.yaml`.
 
-> "No team config found. Let's create `.rival/team.yaml` so I can scope queries to your team.
+**If missing and `--names` not provided**, offer to set it up:
+
+> "No team config found. You have two options:
+> 1. Create team.yaml — tell me which repos to track, I'll discover who's working in them
+> 2. Use --names to track specific people directly (e.g., `/rival:rival-team-status --names \"Bhoomika,Amy,Satish\"`)
 >
-> Would you like to:
-> 1. Create team config interactively (recommended)
-> 2. Run exhaustive query this time (all PRs, all work items)
-> 3. Cancel"
+> Which would you like?"
 
-**If they choose option 1**, walk them through:
-- Team name (default: "main")
-- Members: "List team members (name, devops_id, email). Format: 'Alice Smith, alices, alice@rival.com'. One per line. Empty line to finish."
-- Repos: "Which repos does your team own? (comma-separated, from indexed repos)"
-- Boards/area paths: "Azure DevOps area paths (e.g., 'Rival\\RPM\\Backend')"
+If option 1, walk through interactive setup:
 
-Write `.rival/team.yaml` with this structure:
+> "Which repos should I track for this team?
+> (From your indexed repos, list the ones this team owns or actively works in)
+>
+> Paste comma-separated names, or I can suggest based on naming patterns..."
+
+Write `.rival/team.yaml`:
 
 ```yaml
 default_team: main
@@ -53,80 +53,256 @@ default_team: main
 teams:
   main:
     name: "<team name>"
-    members:
-      - name: "<name>"
-        devops_id: "<devops_id>"
-        email: "<email>"
     repos:
       - <repo1>
       - <repo2>
-    area_paths:
-      - "<area path>"
+    activity_window_days: 60
 ```
 
 Add `.rival/team.yaml` to `.gitignore`.
 
-### Step 3: Run the Status Script
+### Step 3: Gather Enriched Data (Python)
 
-Use the paths from `.rival/config.json` (from rival-init):
-- `paths.python_cmd`
-- `paths.plugin_root`
-
-Construct script path: `{plugin_root}/scripts/team-status.py`
-
-Run with the appropriate flags:
+Run the team-status.py script:
 
 ```bash
-# Default (uses team.yaml default_team):
-{python_cmd} {plugin_root}/scripts/team-status.py --config .rival/team.yaml --env .env
+# Mac/Linux:
+{python_cmd} {plugin_root}/scripts/team-status.py \
+  --config .rival/team.yaml \
+  --env .env \
+  --team <team-name>
 
-# With flags:
-{python_cmd} {plugin_root}/scripts/team-status.py --config .rival/team.yaml --env .env --me
-{python_cmd} {plugin_root}/scripts/team-status.py --config .rival/team.yaml --env .env --member "Alice"
-{python_cmd} {plugin_root}/scripts/team-status.py --config .rival/team.yaml --env .env --repo Rival.Customer.API
-{python_cmd} {plugin_root}/scripts/team-status.py --config .rival/team.yaml --env .env --board RPM-Backend
-{python_cmd} {plugin_root}/scripts/team-status.py --config .rival/team.yaml --env .env --all
+# With --names:
+{python_cmd} {plugin_root}/scripts/team-status.py \
+  --env .env \
+  --names "Bhoomika,Amy,Satish"
+
+# Force refresh of discovered roster:
+{python_cmd} {plugin_root}/scripts/team-status.py \
+  --config .rival/team.yaml --env .env --team skunk --refresh-roster
 ```
 
-On Windows, use `python` instead of `python3` (check `paths.python_cmd`).
+The script:
+1. Discovers team members from branch activity (first run or --refresh-roster)
+2. For each member: queries work items assigned to them (past 60d + active + backlog, across ALL boards)
+3. Fetches PR details (description, changed files, commits)
+4. Writes raw data to `.team-status/YYYY-MM-DD/raw-data.json`
+5. Returns the path to raw-data.json on stdout
 
-### Step 4: Confirm Exhaustive Queries
+Capture the output path from stdout.
 
-If user passed `--all`, confirm before running:
+### Step 4: Synthesize the Report (Claude — this is YOU)
 
-> "Exhaustive mode will query ALL PRs, ALL work items, and ALL boards across the entire Azure DevOps project. This may take 30-60 seconds and returns a lot of data.
->
-> Proceed? [Y/n]"
+**This is the critical step. You (the orchestrator) now read the raw data and write a meaningful narrative.**
 
-### Step 5: Display Results
+Read `.team-status/YYYY-MM-DD/raw-data.json`.
 
-The script outputs formatted text. Display it directly to the user.
+Also read `.rival/config.json` for the full `index.repos` array — you'll need repo names/frameworks to explain system context.
 
-If the user wants to drill down, offer follow-up actions:
+Write a report to `.team-status/YYYY-MM-DD/report.md` with this structure:
 
-> "Want to:
-> 1. See details on a specific PR or work item
-> 2. Filter further (e.g., by state, by assignee)
-> 3. Export as JSON
-> 4. Done"
+```markdown
+# Team Status — <Scope> — <Date>
+
+**Generated:** <ISO timestamp>
+**Scope:** <team name or names list>
+**Window:** last <N> days
+**Members:** <count>
+
+## Team Snapshot
+
+<2-3 sentence high-level summary of what's happening. Examples:
+"The team is focused on OAuth2 integration and webhook reliability improvements
+this cycle. Three people are actively shipping to customer-facing APIs, while one
+is on infrastructure modernization.">
+
+## Themes & Initiatives
+
+<Identify the 2-4 main themes you see across the team. Examples:
+- **OAuth2 Integration** — Bhoomika and Amy are converging on external IdP support
+- **Webhook Reliability** — Fabrizio and Satish are hardening carrier callbacks
+- **EF Core 8 Upgrade** — scattered across repos, owned by Luke>
+
+## Per-Member Reports
+
+---
+
+### <Member Name>
+**Focus:** <1-sentence summary of what they're primarily working on this cycle>
+**Active across <N> boards:** <board names>
+**Activity:** <commits_60d> commits across <repos_active count> repos in last <window> days
+
+#### 📋 Recently Completed (last <N> days) — <count> items
+
+<For each completed item, write 1-2 sentences explaining what it actually did.
+Use the description field, not just the title. Connect to system if possible.>
+
+- **#<id> [Type] <Title>** — Closed <X days ago> · Board: <area path>
+  <What this work accomplished, based on description. 1-2 sentences.>
+
+#### ⏳ In Progress — <count> items
+
+<For each active item, explain WHAT they're doing and WHY it matters.>
+
+- **#<id> [Type] <Title>** — <state> · Board: <area path>
+  <What this work is about. Reference the description. Note any linked items.>
+
+#### 📅 Backlog (assigned) — <count> items
+
+<For each backlog item, brief summary of what's queued up.>
+
+- **#<id> [Type] <Title>** — <state> · Board: <area path>
+  <1-sentence summary from description.>
+
+#### 🔀 Active Pull Requests — <count>
+
+<For each PR, read the title, description, and files_changed. Describe:
+- What this PR does (not just "adds OAuth2" — explain the specifics)
+- Which part of the system it touches (reference the repo's role)
+- Current review state
+- Any interesting details from the commits>
+
+- **#<pr_id> [<repo>] <Title>** — <approval status> · Branch: <source>
+  **What it does:** <2-3 sentences based on description + files_changed>
+  **System impact:** <which service area, what downstream effects, 1-2 sentences>
+  **Files touched:** <count> files in <top-level directories from files_changed>
+  **Recent commits:** <summarize commit messages if interesting>
+
+#### 🧩 System Context
+
+<Based on the repos they're working in + work items + PRs, describe where
+their work fits in the overall system. This is the "hard part" the user mentioned.
+2-3 sentences. Examples:
+
+"Bhoomika's work centers on the authentication boundary — she's owning the
+new OAuth2 flow in Customer.API which interacts with the shared IdentityService
+in Auth.API. Her webhook idempotency work in Apps.API affects the carrier
+integration path, which has downstream impact on billing and notifications.">
+
+---
+
+<Repeat for each member>
+
+---
+
+## Cross-Team Observations
+
+<If you notice patterns across members, surface them:
+- "Three people are touching Customer.API this cycle — coordination needed"
+- "No one is assigned to the Service Bus retry work, but it's in backlog"
+- "Bhoomika and Amy are both working on auth — are they aligned?"
+- "The APIM policy work in backlog has no owner assigned">
+
+## Stale Items
+
+<Call out anything that looks stuck:
+- PRs older than 7 days with no updates
+- Work items assigned but unchanged in >14 days
+- Long-running branches
+- Blocked items>
+
+## Summary Stats
+
+- Total active PRs: <N>
+- PRs ready to merge (all approvals): <N>
+- PRs in review: <N>
+- Active work items: <N>
+- Backlog items: <N>
+- Completed in window: <N>
+```
+
+### Step 5: Display & Offer Next Actions
+
+Show the user a brief summary + report location:
+
+```
+Team status report generated:
+  .team-status/<date>/report.md
+
+Snapshot:
+  [2-3 sentence summary from the report]
+
+Want to:
+1. Open the full report
+2. Dig into a specific person
+3. Refresh the roster (re-discover members)
+4. Save snapshot for tracking (git commit .team-status/)
+5. Done
+```
+
+## Important Synthesis Guidelines
+
+**When reading raw-data.json:**
+
+1. **Read descriptions, not just titles.** A ticket titled "Fix bug" might have a description explaining it's a race condition in payment processing affecting $50K of transactions.
+
+2. **Read PR descriptions AND files_changed.** The description says WHAT, files_changed say WHERE. Together they tell the full story.
+
+3. **Group work items by theme per person.** Don't just list them — identify what each person is FOCUSED on.
+
+4. **Connect to system context using config.index.repos:**
+   - Know what each repo DOES (from language/framework in config)
+   - Know how repos CONNECT (use dependency knowledge or pattern-detector if needed)
+   - Reference the system impact: "This touches the carrier integration boundary"
+
+5. **Be honest about gaps.** If a description is empty or unclear, say so. Don't fabricate meaning.
+
+6. **Highlight cross-cutting concerns.** If two people are working on the same area, say so. If something is orphaned, say so.
+
+7. **Write for a tech lead.** They want to know: "What's my team doing, is it aligned, what's stuck, what needs attention?"
+
+**Tone:**
+- Informative, not dry
+- Specific, not vague
+- Honest about uncertainty
+- Focused on value: "why does this matter?"
+
+## Directory Structure
+
+```
+.team-status/
+  2026-04-05/
+    raw-data.json        ← from Python script
+    discovered-roster.json  ← from first-run or --refresh-roster
+    report.md            ← synthesized by Claude (this skill)
+  2026-04-06/
+    raw-data.json
+    report.md
+  ...
+```
+
+Commit `.team-status/` to git if you want to track team progress over time.
 
 ## Edge Cases
 
 | Situation | Handling |
 |---|---|
-| `.env` missing or no ADO_PAT | "Azure DevOps not configured. Run /rival:rival-init first." |
-| `.rival/team.yaml` missing | Offer interactive setup or `--all` mode |
-| Member not found in team.yaml | Fall through to raw query with the name as-is |
-| No PRs or work items found | Display "All clear — no active work in this scope" |
-| Azure DevOps API rate limit | Script handles timeouts gracefully; show error, suggest retry |
-| `--me` but no git config email | Fall back to asking user for their DevOps identity |
-| Exhaustive query takes too long | Script has 60s timeout per API call; partial results displayed |
+| No team.yaml and no --names | Offer interactive setup or --names mode |
+| Script fails | Show error, suggest checking .env and team.yaml |
+| Member has no work items | Still show them in report with "No active work items tracked" |
+| PR description is empty | Note it and fall back to title + files_changed for summary |
+| Work item description is empty | Use title only, note the gap |
+| First run (no cached roster) | Auto-discover members, save roster |
+| Cached roster stale (>14 days old) | Suggest --refresh-roster in output |
+| --names can't resolve a name | Warn, skip that name, continue with others |
+| Too many members (>15) | Still generate full report; note it will be long |
+| Python script unavailable / crashes | Fall back to simpler text report without enrichment |
+
+## Flags
+
+```bash
+/rival:rival-team-status                           # default team from team.yaml
+/rival:rival-team-status --team skunk              # specific team
+/rival:rival-team-status --team skunk --refresh-roster  # re-discover members
+/rival:rival-team-status --team skunk --window 90  # 90-day window
+/rival:rival-team-status --names "Bhoomika,Amy,Satish"  # ad-hoc people
+```
 
 ## Important Notes
 
-- This skill reads `.env` for ADO_PAT — never prompts for credentials directly
-- Script is at `{paths.plugin_root}/scripts/team-status.py` — Python 3, cross-platform
-- `.rival/team.yaml` is user-managed and gitignored (contains names/emails)
-- PRs and work items are ALWAYS current state (no caching) — fresh from Azure DevOps API
-- Use this for morning standup prep, sprint reviews, "what's my team up to" questions
-- Paired naturally with `/rival:rival-plan` — team-status shows WHAT to work on, rival-plan plans HOW
+- **Synthesis is the value.** Raw data dumps are cheap; insightful summaries are expensive. Take the time to write a good report.
+- **Read every description.** The title is often meaningless; the description has the substance.
+- **Connect work to system.** Don't just summarize tickets — explain what part of the system this work affects.
+- **Roster is cached in team.yaml** after first discovery. Use --refresh-roster when team changes.
+- **Reports are date-stamped.** Running twice the same day overwrites — that's fine for active use.
+- **One report per run.** Don't split into multiple files. Tech lead wants ONE document to read.
