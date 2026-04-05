@@ -81,7 +81,7 @@ For each work item (all of them, but briefly):
 
 ### Step 5: Write the Brief
 
-Write to Output Path. Simple structure:
+Write to Output Path. Structure:
 
 ```markdown
 # Team Brief — <scope> — <date>
@@ -89,6 +89,60 @@ Write to Output Path. Simple structure:
 **Generated:** <timestamp>
 **Scope:** <names or team name>
 **Members covered:** <count>
+**Window:** last <N> days
+
+---
+
+## Executive Summary
+
+<3-4 sentences for a tech lead skimming this on a Monday morning:
+- What is the team collectively focused on this window?
+- What are the 2-3 dominant themes?
+- What needs attention? (stale items, orphaned work, alignment gaps)
+- Key numbers: total items, stale items count, PRs waiting on review>
+
+## At-a-Glance Visualizations
+
+### Workload Distribution
+```
+<ASCII bar chart showing active items per member, sorted desc>
+Alice       ████████████████████  20
+Bhoomika    ██████████████████    18
+Satish      █████████████         13
+Chris       ████████              8
+Fabrizio    █████                 5
+```
+
+### Work State Breakdown (team-wide)
+```
+<Stacked ASCII bars showing active/backlog/completed per member>
+         Active  Backlog  Done
+Alice    ██████   ██       ████
+Bhoomika ██████   █        ██
+Satish   ████     ███      ██
+```
+
+### Board Activity Heat Map
+```
+<Table showing which members touch which boards>
+                Skunk  IQ-NB  IQ-DQ  MR-Intact  MR-Portage
+Alice             X              X
+Bhoomika          X      X      X      X           X
+Satish                          X                  X
+```
+
+### Themes & Owners (Mermaid)
+```mermaid
+graph LR
+  T1[Skunk: Service Bus Platform] --> Bhoomika
+  T1 --> Alice
+  T2[CSIO 1.46 Rollout] --> Bhoomika
+  T3[Aviva Guidewire] --> Bhoomika
+  T3 --> Satish
+  T4[Manufactured Rate Bugs] --> Bhoomika
+```
+
+<Use real data — members and themes from the raw-data. Keep diagrams small (3-6 nodes).>
 
 ---
 
