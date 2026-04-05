@@ -465,7 +465,11 @@ def main(argv: Sequence[str]) -> int:
 
     if not args.skip_repos:
         log("Fetching repository list...")
-        repos = client.list_repositories()
+        try:
+            repos = client.list_repositories()
+        except AzureDevOpsError as exc:
+            log(f"ERROR: Failed to list repositories. Check PAT has Code (Read) scope.\n  {exc}")
+            return 1
         log(f"Found {len(repos)} repositories. Cloning...")
         used_names: Dict[str, str] = {}  # safe_name -> original name, for collision detection
         for i, repo in enumerate(repos, 1):
