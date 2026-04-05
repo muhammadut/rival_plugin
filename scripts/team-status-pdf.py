@@ -310,30 +310,46 @@ def escape_xml(text: str) -> str:
     return (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
-def safe_paragraph(text: str, style) -> Paragraph:
-    """Escape XML but preserve <b>, <i>, <font> tags."""
-    # Protect tags
-    placeholders = {
-        "<b>": "\x00B_O\x00", "</b>": "\x00B_C\x00",
-        "<i>": "\x00I_O\x00", "</i>": "\x00I_C\x00",
-    }
-    for src, dst in placeholders.items():
-        text = text.replace(src, dst)
-    # Protect <font ...> and </font>
+def md_to_rl(text: str) -> str:
+    """Convert markdown-style formatting to ReportLab XML tags, then escape the rest."""
+    # Use unique markers that won't appear in content
+    BO, BC = "{{RL_B_O}}", "{{RL_B_C}}"
+    IO, IC = "{{RL_I_O}}", "{{RL_I_C}}"
+    HBO, HBC = "{{RL_HB_O}}", "{{RL_HB_C}}"
+    HIO, HIC = "{{RL_HI_O}}", "{{RL_HI_C}}"
+    FC = "{{RL_FC}}"
+
+    # Step 1: Convert markdown **bold** and *italic* to placeholders
+    # Do bold first (** before *)
+    text = re.sub(r"\*\*(.+?)\*\*", BO + r"\1" + BC, text)
+    text = re.sub(r"(?<!\*)\*([^*]+?)\*(?!\*)", IO + r"\1" + IC, text)
+
+    # Step 2: Protect existing HTML tags
+    text = text.replace("<b>", HBO).replace("</b>", HBC)
+    text = text.replace("<i>", HIO).replace("</i>", HIC)
     font_tags = re.findall(r'<font[^>]*>', text)
     for i, tag in enumerate(font_tags):
-        text = text.replace(tag, f"\x00FONT_O_{i}\x00", 1)
-    text = text.replace("</font>", "\x00FONT_C\x00")
+        text = text.replace(tag, f"{{{{RL_FO_{i}}}}}", 1)
+    text = text.replace("</font>", FC)
 
+    # Step 3: Escape XML entities
     text = escape_xml(text)
 
-    # Restore
-    for src, dst in placeholders.items():
-        text = text.replace(dst, src)
+    # Step 4: Restore
+    text = text.replace(BO, "<b>").replace(BC, "</b>")
+    text = text.replace(IO, "<i>").replace(IC, "</i>")
+    text = text.replace(HBO, "<b>").replace(HBC, "</b>")
+    text = text.replace(HIO, "<i>").replace(HIC, "</i>")
     for i, tag in enumerate(font_tags):
-        text = text.replace(f"\x00FONT_O_{i}\x00", tag)
-    text = text.replace("\x00FONT_C\x00", "</font>")
-    return Paragraph(text, style)
+        text = text.replace(f"{{{{RL_FO_{i}}}}}", tag)
+    text = text.replace(FC, "</font>")
+
+    return text
+
+
+def safe_paragraph(text: str, style) -> Paragraph:
+    """Convert markdown formatting to ReportLab tags, escape the rest, return Paragraph."""
+    return Paragraph(md_to_rl(text), style)
 
 
 # ============================================================
