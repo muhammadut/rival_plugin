@@ -46,6 +46,8 @@ Analyze the user's query and classify:
 
 | Intent Pattern | Sub-flow |
 |----------------|----------|
+| "PR #1234", "look at PR", "review PR" | **PR Deep Dive** |
+| "ticket #26961", "look at ticket", "what does #26961 require" | **Ticket Deep Dive** |
 | "explain <repo>", "what is <repo>" | Repo Brief |
 | "where is <symbol> called/used" | Symbol Trace |
 | "how does <pattern> work across repos" | Cross-Repo Pattern Comparison |
@@ -55,6 +57,43 @@ Analyze the user's query and classify:
 | Generic / unclear | Generic Investigation |
 
 Don't announce the sub-flow — just use the appropriate approach. The user asked a question, not a menu selection.
+
+#### PR Deep Dive Sub-flow
+
+When the user mentions a PR number (e.g., "look at PR #7337", "is PR #7337 ready to merge?"):
+
+1. Extract the PR number from the query
+2. Fetch full PR details using the ado-fetch script:
+   ```bash
+   {python_cmd} {plugin_root}/scripts/ado-fetch.py --pr <id> --env .env --with-comments --with-diff
+   ```
+3. Read the JSON output — you now have: title, description, changed files, commits, review status, comments
+4. Read the **actual changed files** from `knowledge/repos/<repo>/` (the repo name is in the JSON)
+5. Investigate with context:
+   - What does this PR actually do? (read description + files_changed)
+   - Is the code correct? (read the actual files in knowledge/repos/)
+   - Any risks? (cross-reference with other repos if relevant)
+   - Review status — who approved, who hasn't, any blocking comments?
+   - Should it merge? (your assessment based on code + context)
+
+#### Ticket Deep Dive Sub-flow
+
+When the user mentions a ticket/work item number (e.g., "what does #26961 require?"):
+
+1. Extract the ticket number from the query
+2. Fetch full ticket details:
+   ```bash
+   {python_cmd} {plugin_root}/scripts/ado-fetch.py --ticket <id> --env .env --with-history
+   ```
+3. Read the JSON — you now have: title, description, acceptance criteria, assigned_to, state history, related items, comments
+4. Identify which repo(s) this ticket touches (from description, related items, area path)
+5. Read relevant code from `knowledge/repos/<repo>/`
+6. Investigate:
+   - What does this ticket want? (plain English from description)
+   - What's the current state of the code? (read the relevant files)
+   - What needs to change? (gap between ticket intent and code reality)
+   - Related items — what's the parent story/feature? What's linked?
+   - How long has it been active? (from state history)
 
 ### Step 3: Ask Clarifying Questions (Complex Only)
 
