@@ -6,7 +6,7 @@ on:
     paths:
       - 'skills/**'
       - 'agents/**'
-      - 'frameworks/**'
+      - 'scripts/**'
 
 jobs:
   version-bump:

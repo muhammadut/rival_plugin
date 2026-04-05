@@ -5,6 +5,7 @@ tools:
   - WebSearch
   - WebFetch
   - Read
+  - Write
 model: inherit
 ---
 
@@ -30,14 +31,13 @@ execution.
 
 You will receive a task prompt containing:
 
-1. **Feature Description** -- what is being built or changed.
-2. **Expert Domain** -- the specific technology domain to research (e.g., "azure-service-bus",
-   "redis-caching", "azure-apim", "cosmos-db", "azure-functions", "rabbitmq").
-3. **Stack Info** -- the language, framework, and SDK versions in use (e.g., ".NET 8,
-   C#, Azure.Messaging.ServiceBus 7.x").
-4. **Optional: Specific Questions** -- pointed questions the orchestrator wants answered
-   (e.g., "Can Service Bus sessions guarantee ordering across partitions?").
-5. **Optional context** -- any prior analysis, constraints, or scope hints from the orchestrator.
+1. **Feature Request (THE NORTH STAR)** -- the exact original feature request from the user, verbatim. This is your anchor. Every search and finding must tie back to THIS request in the context of your domain.
+2. **Expert Domain** -- the specific technology domain to research (e.g., "azure-service-bus", "redis-caching", "azure-apim", "cosmos-db", "azure-functions", "rabbitmq").
+3. **Stack Info** -- the language, framework, and SDK versions in use (e.g., ".NET 8, C#, Azure.Messaging.ServiceBus 7.x").
+4. **Task Size** -- `MEDIUM` (8-12 searches) or `LARGE` (15-20 searches).
+5. **Output Path** -- the absolute path where you must write your findings (e.g., `.rival/workstreams/<id>/agent-outputs/02-expert-researcher-azure.md`).
+6. **Optional: Specific Questions** -- pointed questions the orchestrator wants answered.
+7. **Optional context** -- any prior analysis, constraints, or scope hints from the orchestrator.
 
 ## Process
 
@@ -309,7 +309,13 @@ only pages that appear highly relevant based on the search snippet.
 
 ## Output Format
 
-Structure your response with these exact sections:
+**IMPORTANT:** You MUST write your full output to the file path provided in the input (Output Path). Use the Write tool. Then return a brief 3-5 line summary to the orchestrator.
+
+Structure your output file with these exact sections:
+
+### Feature Request (North Star)
+
+> [exact user feature request from the input, unchanged]
 
 ### Domain: `<expert-domain>`
 

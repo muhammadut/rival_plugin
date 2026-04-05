@@ -16,7 +16,6 @@
     ".claude-plugin/",
     "skills/",
     "agents/",
-    "frameworks/",
     "scripts/",
     "docs/"
   ]

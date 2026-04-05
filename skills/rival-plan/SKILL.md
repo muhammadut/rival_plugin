@@ -17,7 +17,7 @@ Read `.rival/config.json`. If it doesn't exist, stop and tell the user:
 > "Rival isn't configured for this project yet. Run `/rival:rival-init` first."
 
 Store the config values — you'll need them throughout:
-- `paths.plugin_root` (absolute path to Rival plugin — needed to find framework docs and agent definitions)
+- `paths.plugin_root` (absolute path to Rival plugin — needed to find agent definitions)
 - `paths.knowledge_dir` (where repos and wikis are stored)
 - `project_type` (brownfield/greenfield)
 - `stack` (language, framework, test_framework, orm, runtime)
@@ -63,11 +63,21 @@ For each state.json found, check:
 
 ### 1.5 Create Workstream
 
-Create the workstream directory and initial state:
+Create the workstream directory, initial state, and agent-outputs subdirectory:
 
 ```bash
-mkdir -p .rival/workstreams/<id>
+mkdir -p .rival/workstreams/<id>/agent-outputs
 ```
+
+The `agent-outputs/` subdirectory is where each analysis agent writes its full findings. Agents read each other's outputs from here to collaborate.
+
+**Compute the absolute path** for later use in agent prompts. Run `pwd` (on Mac/Linux) or `cd` (on Windows PowerShell) to get the current working directory, then construct:
+
+```
+<cwd>/.rival/workstreams/<id>/agent-outputs/
+```
+
+Store this as `agent_outputs_dir_abs` — you'll pass it to every spawned agent.
 
 Write `.rival/workstreams/<id>/state.json`:
 ```json
@@ -168,26 +178,14 @@ Override rules:
 - `--light` flag forces LIGHT regardless of complexity (but warn if task looks larger)
 - `--discussion` flag forces DISCUSSION
 
-### 2.2 Framework Doc Selection
-
-With 1M context, you (the main agent) can read 2-3 framework docs directly. Decide which are relevant:
-- New entities/domain concepts → read `frameworks/ddd.md` (use `{config.paths.plugin_root}/frameworks/ddd.md`)
-- Architectural changes → read `frameworks/c4-model.md`
-- Event flows or async patterns → read `frameworks/event-storming.md`
-- User-facing feature → read `frameworks/bdd.md`
-- Custom framework docs in `.rival/frameworks/` take priority over bundled
-
-Read the relevant framework files now. You'll use them during synthesis.
-
-### 2.3 Present Triage
+### 2.2 Present Triage
 
 Show the triage result to the user with option to override:
 
 ```
 Triage: MEDIUM — single-repo feature, ~6 files affected
-Research: industry patterns + azure (from experts)
+Research: industry patterns + azure (from experts) — 12-18 searches
 Analysis: code-explorer + security-analyzer + pattern-detector
-Framework docs: DDD (new domain entities detected)
 
 [Accept] [Upgrade to LARGE] [Downgrade to LIGHT]
 ```
@@ -201,11 +199,12 @@ Store the triage in state.json:
     "size": "MEDIUM",
     "research_plan": ["industry", "azure"],
     "agents": ["code-explorer", "pattern-detector", "security-analyzer"],
-    "framework_docs": ["ddd"],
     "override": "none"
   }
 }
 ```
+
+The researcher will dynamically identify relevant patterns and methodologies during its web research — no pre-selection of framework docs needed. Methodologies (DDD, CQRS, Saga, etc.) are called out by the researcher when they apply to the specific feature + stack combination.
 
 ## Phase 3: Research Phase (MEDIUM + LARGE only)
 
@@ -225,13 +224,15 @@ If the file does NOT exist, proceed to Step 3.1 as normal.
 
 ### 3.1 Spawn Research Agents in Parallel
 
+Every agent prompt MUST include the original feature request verbatim as the North Star, the task size, and the absolute path where the agent writes its output file.
+
 ```
 Agent(
   subagent_type="rival:researcher",
   description="Research: <feature short name>",
   prompt="
-    ## Feature Request
-    <feature description>
+    ## Feature Request (THE NORTH STAR)
+    <original user feature request, VERBATIM>
 
     ## Stack
     <language, framework, test_framework, orm, runtime>
@@ -239,19 +240,27 @@ Agent(
     ## Expert Domains
     <list from config.experts>
 
-    Research industry best practices for this type of feature in this stack.
+    ## Task Size
+    <MEDIUM or LARGE>
+
+    ## Output Path
+    {agent_outputs_dir_abs}/01-researcher.md
+
+    Research industry best practices, patterns, and methodologies relevant to this specific
+    feature in this specific stack. Write your full findings to the Output Path using the
+    Write tool. Return only a 3-5 line summary.
   "
 )
 ```
 
-For each relevant expert domain, also spawn:
+For each relevant expert domain, also spawn (number them 02, 03, etc.):
 ```
 Agent(
   subagent_type="rival:expert-researcher",
   description="Expert: <domain>",
   prompt="
-    ## Feature Request
-    <feature description>
+    ## Feature Request (THE NORTH STAR)
+    <original user feature request, VERBATIM>
 
     ## Expert Domain
     <domain name>
@@ -259,74 +268,62 @@ Agent(
     ## Stack
     <language, framework>
 
-    Research this specific domain's documentation, patterns, and limits.
+    ## Task Size
+    <MEDIUM or LARGE>
+
+    ## Output Path
+    {agent_outputs_dir_abs}/02-expert-researcher-<domain>.md
+
+    Research this specific domain's documentation, patterns, and limits as they apply to
+    this feature. Write your full findings to the Output Path using the Write tool.
+    Return only a 3-5 line summary.
   "
 )
 ```
 
 **IMPORTANT:** Launch ALL research agents in a SINGLE message so they run in parallel.
 
-### 3.2 Load Lessons from Knowledge
+### 3.2 Load Lessons from Learning
 
 Read `.rival/learning/codebase-patterns.md` and `.rival/learning/lessons-learned.md` if they exist. These contain lessons from past workstreams that should inform this plan.
 
 Note any relevant lessons for later synthesis.
 
-### 3.3 Collect Research Results
+### 3.3 Wait for Research Completion
 
-Gather all research agent results. Store a summary in the workstream directory:
-`.rival/workstreams/<id>/research-summary.md`
+Wait for all researcher + expert-researcher agents to finish. They will have written their outputs to `agent-outputs/01-researcher.md` and `agent-outputs/02-expert-researcher-*.md`.
+
+Do NOT proceed to Phase 4 until these files exist — pattern-detector, code-explorer, and security-analyzer all read from them.
 
 For DISCUSSION mode: skip to Phase 6.5 (present discussion document instead of plan).
 
 ## Phase 4: Codebase Analysis Phase
 
-Which agents get spawned depends on triage size:
+Agents run SEQUENTIALLY because each builds on the previous one's findings (via the agent-outputs/ directory).
+
+Which agents spawn depends on triage size:
 
 | Agent | LIGHT | MEDIUM | LARGE |
 |-------|-------|--------|-------|
-| code-explorer | yes | yes | yes |
 | pattern-detector | skip | yes | yes |
-| security-analyzer | skip | after code-explorer | after code-explorer |
+| code-explorer | yes | yes | yes |
+| security-analyzer | skip | yes | yes |
 
-Agents explore as deeply as needed — no artificial budget caps. Trust the model to stop when it has enough information.
+**Order (MEDIUM + LARGE):** pattern-detector → code-explorer → security-analyzer
 
-### 4.1 Batch 1 — Parallel Agents
+Why this order: pattern-detector compares repo patterns to researcher's findings (divergence report). Code-explorer then uses those patterns to find the right files. Security-analyzer then traces blast radius with full context.
 
-Spawn agents that have no dependencies on each other:
+### 4.1 Pattern Detector (MEDIUM + LARGE)
 
-**Code Explorer** (all sizes):
-```
-Agent(
-  subagent_type="rival:code-explorer",
-  description="Explore: <feature short name>",
-  prompt="
-    ## Feature Request
-    <feature description>
+Pattern-detector reads researcher outputs from `agent-outputs/01-researcher.md` and `02-expert-researcher-*.md`, then scans repos for conventions and divergences.
 
-    ## Primary Repo
-    <primary repo name and path from Phase 1.6>
-
-    ## Connected Repos (discovered via dependency tracing)
-    <JSON array of connected repos from Phase 1.7>
-
-    ## All Indexed Repos (search these if you discover additional connections)
-    <JSON array of all repos from config.index.repos>
-
-    Find all relevant code, symbols, and gaps. Focus on primary + connected repos
-    but explore any indexed repo if you discover dependencies beyond the initial graph.
-  "
-)
-```
-
-**Pattern Detector** (MEDIUM + LARGE only):
 ```
 Agent(
   subagent_type="rival:pattern-detector",
   description="Patterns: <feature short name>",
   prompt="
-    ## Feature Request
-    <feature description>
+    ## Feature Request (THE NORTH STAR)
+    <original user feature request, VERBATIM>
 
     ## Primary Repo
     <primary repo name and path>
@@ -337,26 +334,70 @@ Agent(
     ## All Indexed Repos
     <JSON array of all repos>
 
-    Detect codebase conventions and patterns. Focus on primary + connected repos.
-    Check if patterns are consistent across repos or repo-specific.
+    ## Prior Agent Outputs (read these FIRST)
+    - {agent_outputs_dir_abs}/01-researcher.md
+    - {agent_outputs_dir_abs}/02-expert-researcher-<domain>.md (one per domain)
+
+    ## Task Size
+    <MEDIUM or LARGE>
+
+    ## Output Path
+    {agent_outputs_dir_abs}/03-pattern-detector.md
+
+    Detect codebase conventions, compare to researcher findings, and emit a Divergence Report
+    for any existing patterns that conflict with industry best practices. Search broadly across
+    all repos for analogous features. Write full findings to Output Path. Return 3-5 line summary.
   "
 )
 ```
 
-Launch Batch 1 agents in a SINGLE message (parallel).
+### 4.2 Code Explorer (all sizes)
 
-### 4.2 Batch 2 — Depends on Batch 1
+Code-explorer reads all prior outputs (researcher + expert-researcher + pattern-detector), then explores within the scoped repos.
 
-After code-explorer completes, spawn:
+```
+Agent(
+  subagent_type="rival:code-explorer",
+  description="Explore: <feature short name>",
+  prompt="
+    ## Feature Request (THE NORTH STAR)
+    <original user feature request, VERBATIM>
 
-**Security + Impact Analyzer** (MEDIUM + LARGE only):
+    ## Primary Repo (EXPLORATION TARGET)
+    <primary repo name and path>
+
+    ## Connected Repos (EXPLORATION TARGET — dependency traced)
+    <JSON array of connected repos>
+
+    ## All Indexed Repos (SEARCH REFERENCE — not exploration target)
+    <JSON array of all repos>
+
+    ## Prior Agent Outputs (read these FIRST, if they exist)
+    - {agent_outputs_dir_abs}/01-researcher.md
+    - {agent_outputs_dir_abs}/02-expert-researcher-*.md
+    - {agent_outputs_dir_abs}/03-pattern-detector.md
+
+    ## Output Path
+    {agent_outputs_dir_abs}/04-code-explorer.md
+
+    Find all relevant code, symbols, and gaps WITHIN the primary + connected repos. Only expand
+    to All Indexed Repos if you discover a specific dependency during exploration. Write full
+    findings to Output Path. Return 3-5 line summary.
+  "
+)
+```
+
+### 4.3 Security Analyzer (MEDIUM + LARGE)
+
+Security-analyzer reads all prior outputs, then traces blast radius and security risks.
+
 ```
 Agent(
   subagent_type="rival:security-analyzer",
   description="Security: <feature short name>",
   prompt="
-    ## Feature Request
-    <feature description>
+    ## Feature Request (THE NORTH STAR)
+    <original user feature request, VERBATIM>
 
     ## Primary Repo
     <primary repo name and path>
@@ -364,13 +405,21 @@ Agent(
     ## Connected Repos
     <JSON array of connected repos>
 
-    ## All Indexed Repos
+    ## All Indexed Repos (search reference)
     <JSON array of all repos>
 
-    ## Code Explorer Results
-    <paste full code-explorer output>
+    ## Prior Agent Outputs (read ALL of these FIRST)
+    - {agent_outputs_dir_abs}/01-researcher.md
+    - {agent_outputs_dir_abs}/02-expert-researcher-*.md
+    - {agent_outputs_dir_abs}/03-pattern-detector.md
+    - {agent_outputs_dir_abs}/04-code-explorer.md
 
-    Trace blast radius and identify security risks across all affected repos.
+    ## Output Path
+    {agent_outputs_dir_abs}/05-security-analyzer.md
+
+    Trace blast radius and identify security risks. Focus on the files code-explorer identified
+    and the divergences pattern-detector flagged. Write full findings to Output Path. Return
+    3-5 line summary.
   "
 )
 ```
@@ -379,9 +428,9 @@ Agent(
 
 You now have results from research agents (if MEDIUM/LARGE), code analysis agents, and knowledge files. Synthesize everything into the self-contained plan document.
 
-### 5.1 Read Framework Docs (if selected in triage)
+### 5.1 Read All Agent Outputs
 
-If you haven't already, read the relevant framework reference docs from `{config.paths.plugin_root}/frameworks/`. Use their guidance to inform the plan structure.
+Read every file in `.rival/workstreams/<id>/agent-outputs/` directly. These are the full-fidelity outputs from researcher, expert-researcher, pattern-detector, code-explorer, and security-analyzer. Use them verbatim for synthesis — do NOT rely on summaries.
 
 ### 5.2 Write the Plan Document
 
@@ -407,7 +456,14 @@ and which parts are affected. For LIGHT: skip this section.>
 ## Research Findings
 <For MEDIUM/LARGE: Key findings from researcher + expert-researcher.
 Include source URLs. Organized by relevance to the plan.
+Include the Recommended Methodologies & Patterns from researcher.
 For LIGHT: skip.>
+
+## Pattern Divergences
+<For MEDIUM/LARGE: From pattern-detector's Divergence Report.
+List only MAJOR and CRITICAL divergences.
+For each: repo pattern → industry recommendation → recommendation (migrate/keep).
+For LIGHT: skip. If no divergences: "Existing patterns align with industry best practices.">
 
 ## Lessons from Past Workstreams
 <Any relevant entries from .rival/learning/*.md.
@@ -478,7 +534,7 @@ When synthesizing the plan:
 - Follow codebase patterns from pattern-detector
 - Include security mitigations from security-analyzer
 - Apply relevant lessons from .rival/learning/
-- If DDD framework was loaded, align with bounded context boundaries
+- If the researcher recommended methodologies (DDD, CQRS, etc.), apply their guidance where relevant
 - Cross-repo changes: modify shared-models/contracts first, then consumers
 
 ## Phase 6: Auto-Review (MEDIUM + LARGE only)
@@ -643,7 +699,7 @@ On **Reject**: Reset state to `planning`, ask for new direction.
 - You run INLINE — you are Claude in the current conversation. Do NOT fork context.
 - Sub-agents return their results TO YOU. You synthesize everything.
 - The plan document MUST be self-contained. A fresh Claude Code instance with zero context must be able to read plan.md and execute without any other artifacts.
-- Framework file resolution: check `.rival/frameworks/<name>.md` first (project-local custom), then `{config.paths.plugin_root}/frameworks/<name>.md` (bundled).
+- Methodology guidance comes dynamically from the researcher agent (no static framework files).
 - If an agent fails or returns poor results, note it in the plan and proceed.
 - Keep the user informed: "Researching...", "Analyzing codebase...", "Writing plan...", "Auto-reviewing..."
 - Never timeout Codex — let it run as long as it needs.

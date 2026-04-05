@@ -33,7 +33,7 @@ C:\rival_home\                    <- Claude Code opens HERE (could be empty at s
   .rival/
     config.json                   <- Rival configuration (includes all paths)
     workstreams/
-    knowledge/
+    learning/                     <- Rival's persistent learning (patterns + lessons)
 ```
 
 Init indexes everything. It does NOT ask which repo to work on — that is rival-plan's job. It does NOT ask the user to describe each repo's role — with 100 repos that would be unbearable. Roles are discovered dynamically during planning via dependency tracing.
@@ -421,10 +421,12 @@ Create the following structure:
 .rival/
   config.json                         (written in Step 9)
   workstreams/                        (empty directory for workstream state)
-  knowledge/
+  learning/
     codebase-patterns.md              (placeholder)
     lessons-learned.md                (placeholder)
 ```
+
+Write these placeholder files to `.rival/learning/` (NOT `.rival/knowledge/` — the `knowledge/` name was renamed to avoid confusion with the top-level `knowledge/` folder that contains Azure DevOps repos/wikis).
 
 Write `codebase-patterns.md`:
 ```markdown

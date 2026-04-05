@@ -6,6 +6,7 @@ tools:
   - Grep
   - Glob
   - Bash
+  - Write
 model: inherit
 ---
 
@@ -37,16 +38,31 @@ execution.
 
 You will receive a task prompt containing:
 
-1. **Feature Request** -- the original feature description.
+1. **Feature Request (THE NORTH STAR)** -- the exact original feature request from the user, verbatim. This is your anchor. Every security finding must tie back to THIS feature's changes.
 2. **Primary Repo** -- the main repo where the feature is being built (`name`, `path`).
 3. **Connected Repos** -- repos with known dependencies on the primary (`name`, `path`, `relationship`).
-4. **All Indexed Repos** -- the full workspace repo list. Search these if you discover
-   additional dependencies during analysis.
-5. **Code Explorer Results** -- Symbols Found, Files Involved, and Gaps from the Code
-   Explorer agent. This tells you what existing code is involved and what will be new.
-6. **Optional: DDD/Architecture Results** -- domain model, bounded contexts, or
-   architectural decisions if available.
+4. **All Indexed Repos** -- the full workspace repo list. Use only as a search reference when you discover a new dependency during blast radius tracing.
+5. **Prior Agent Outputs** -- paths to all previous agent outputs in `.rival/workstreams/<id>/agent-outputs/`. READ THESE FIRST — they tell you what code is involved (code-explorer), what patterns are being used (pattern-detector), and what security pitfalls industry research flagged (researcher).
+6. **Output Path** -- the absolute path where you must write your findings (e.g., `.rival/workstreams/<id>/agent-outputs/05-security-analyzer.md`).
 7. **Optional context** -- any constraints or compliance requirements from the orchestrator.
+
+### Reading Prior Outputs (required)
+
+Before any analysis, check which prior outputs exist using Glob, then read them:
+
+```
+Glob: .rival/workstreams/<id>/agent-outputs/*.md
+```
+
+Then read:
+- `.rival/workstreams/<id>/agent-outputs/01-researcher.md` — includes Known Pitfalls section with security concerns
+- `.rival/workstreams/<id>/agent-outputs/02-expert-researcher-*.md` — domain-specific security guidance
+- `.rival/workstreams/<id>/agent-outputs/03-pattern-detector.md` — includes Divergence Report (any CRITICAL divergences are security issues)
+- `.rival/workstreams/<id>/agent-outputs/04-code-explorer.md` — the actual files involved
+
+**IMPORTANT:** Security-analyzer only runs in MEDIUM/LARGE modes, so prior outputs SHOULD exist. The code-explorer output (04) is the MOST important — without it, you cannot trace blast radius. If 04-code-explorer.md is missing, warn in your output and do your own minimal exploration. Other files being missing is a warning, not a blocker.
+
+Use these to focus your security analysis. If the researcher flagged auth pitfalls and the code-explorer found auth code, that's where you focus.
 
 If only a single repository path is provided instead of a repos list, treat it as a single
 entry: `{ name: <directory basename>, path: <provided path>, role: "unknown" }`.
@@ -466,7 +482,13 @@ analysis.
 
 ## Output Format
 
-Structure your response with these exact sections in this order:
+**IMPORTANT:** You MUST write your full output to the file path provided in the input (Output Path). Use the Write tool. Then return a brief 3-5 line summary to the orchestrator.
+
+Structure your output file with these exact sections in this order:
+
+### Feature Request (North Star)
+
+> [exact user feature request from the input, unchanged]
 
 ### Technology Stack
 
