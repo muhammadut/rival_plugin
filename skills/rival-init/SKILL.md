@@ -424,9 +424,13 @@ Create the following structure:
   learning/
     codebase-patterns.md              (placeholder)
     lessons-learned.md                (placeholder)
+  investigations/                     (empty directory for /rival:rival-investigate reports)
+  reviews/                            (empty directory for /rival:rival-review-code reports)
 ```
 
 Write these placeholder files to `.rival/learning/` (NOT `.rival/knowledge/` — the `knowledge/` name was renamed to avoid confusion with the top-level `knowledge/` folder that contains Azure DevOps repos/wikis).
+
+The `investigations/` and `reviews/` directories are created empty — they're filled by the `/rival:rival-investigate` and `/rival:rival-review-code` skills respectively.
 
 Write `codebase-patterns.md`:
 ```markdown
