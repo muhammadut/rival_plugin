@@ -182,7 +182,29 @@ Commit `.team-status/` to git if you want to track team progress over time.
 /rival:rival-team-status --team skunk --refresh-roster  # re-discover members
 /rival:rival-team-status --team skunk --window 90  # 90-day window
 /rival:rival-team-status --names "Bhoomika,Amy,Satish"  # ad-hoc people
+/rival:rival-team-status --team skunk --pdf        # also generate PDF with charts
 ```
+
+### Step 6 (optional): Generate PDF Report
+
+If the user passed `--pdf` OR asks for a PDF version after the markdown brief is done, run the PDF generator:
+
+```bash
+{python_cmd} {plugin_root}/scripts/team-status-pdf.py \
+  --input .team-status/<date>/raw-data.json \
+  --report .team-status/<date>/report.md \
+  --output .team-status/<date>/report.pdf
+```
+
+Dependencies: `matplotlib` and `reportlab` (install via `pip3 install matplotlib reportlab`).
+
+The PDF contains:
+- **Cover page** — team name, stats box, generation date
+- **Executive summary** — from the markdown report
+- **Charts page** — workload distribution (stacked bars), PR distribution, board heat map
+- **Per-member sections** — each with header line, narrative, compact ticket table
+
+If the Python dependencies aren't installed, the script prints an install hint and exits with error. Report that to the user and suggest they run `pip3 install matplotlib reportlab`, then retry.
 
 ## Important Notes
 
