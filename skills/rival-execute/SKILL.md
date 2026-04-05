@@ -164,17 +164,21 @@ For each wave within a phase, spawn sub-agents for all non-conflicting tasks in 
 ```
 You are implementing Task {N.M} from a Rival execution plan.
 
+## Feature Context (from plan.md "Feature Request & Clarifications" section)
+{paste the full "Feature Request & Clarifications" section from plan.md — original request + clarified scope, success criteria, integration, edge cases}
+
 ## Your Task
 {paste the task section from plan.md — includes Before/After code, tests, effects}
 
 ## Rules
-1. Implement ONLY what the task specifies. No extras.
-2. Read files fresh from disk before editing — a teammate may have changed them.
-3. Run the specified tests. All must pass.
-4. Commit with conventional format: feat|fix|refactor: <desc> (task N.M)
+1. Implement ONLY what the task specifies. Stay within the clarified scope above — do NOT expand beyond it.
+2. If the task seems to violate the clarified scope (e.g., adds functionality marked "out of scope"), STOP and report FAIL with a scope violation note.
+3. Read files fresh from disk before editing — a teammate may have changed them.
+4. Run the specified tests. All must pass.
+5. Commit with conventional format: feat|fix|refactor: <desc> (task N.M)
    Use a HEREDOC for the commit message.
-5. Stage specific files only — not git add .
-6. Report results in this exact format:
+6. Stage specific files only — not git add .
+7. Report results in this exact format:
 
 ## Task Result
 - Status: PASS | FAIL
@@ -182,7 +186,7 @@ You are implementing Task {N.M} from a Rival execution plan.
 - Files modified: <list>
 - Tests: <command run> — <N>/<N> passing
 - Commit: <hash> <message>
-- Notes: <any observations>
+- Notes: <any observations, scope concerns, or clarification needs>
 
 If tests fail after 2 attempts, report FAIL with details.
 ```

@@ -2,7 +2,7 @@
 name: rival-plan
 description: Plan a feature. Researches best practices, explores codebase, synthesizes self-contained execution plan with auto-review.
 user-invocable: true
-argument-hint: <feature-description> [--light] [--discussion]
+argument-hint: <feature-description> [--light] [--discussion] [--no-questions]
 ---
 
 # Rival Plan — Research + Analysis + Planning Orchestrator
@@ -32,11 +32,13 @@ The input comes from `$ARGUMENTS`. Parse it for:
 - **Feature description:** The main text (everything that isn't a flag)
 - **`--light` flag:** Minimal analysis, no research, no auto-review
 - **`--discussion` flag:** Research only, no execution plan, architecture exploration
+- **`--no-questions` or `--skip-clarify` flag:** Skip Phase 1.8 clarifying questions
 
 Examples:
-- `Add async carrier callbacks` → feature, mode: standard
+- `Add async carrier callbacks` → feature, mode: standard, ask questions
 - `Fix null ref in QuotationValidator.cs line 47 --light` → feature, mode: light
 - `Should we use Event Sourcing for billing? --discussion` → feature, mode: discussion
+- `Add OAuth2 login --no-questions` → skip clarification, proceed with original description
 
 If the feature description is empty, ask the user: "What feature do you want to plan?"
 
@@ -155,6 +157,102 @@ Store in workstream state:
 
 Agents will focus on primary + connected repos, but can search any indexed repo if they discover additional connections during exploration.
 
+### 1.8 Clarifying Questions (Don't Assume, Always Ask)
+
+**Philosophy:** a one-line feature request leaves too much room for interpretation. Before burning research/analysis budget on the wrong thing, have a brief back-and-forth with the user to clarify scope, success criteria, and edge cases.
+
+**Skip this phase if:**
+- The user passed `--no-questions` or `--skip-clarify` flag
+- The feature description is already very detailed (2+ paragraphs with specific files, behaviors, edge cases named)
+- Mode is LIGHT with a very specific ask (single file, exact line, clear fix) — instead, ask ONE confirming question
+
+**Otherwise, generate 3-5 targeted questions** based on:
+- The feature description
+- The primary repo's stack and framework
+- The connected repos (from Phase 1.7 dependency discovery)
+- The existing patterns you can already see from repo names
+
+**Universal questions (always include 3-4 of these):**
+
+1. **Scope boundary** — "What should this feature NOT do? Anything that's out of scope?"
+2. **Success criteria** — "How will you know it's working? Specific test, behavior, or output?"
+3. **Existing integration** — Reference a specific connected repo: "I see `<repo-name>` already has `<existing-pattern>` — should this follow that pattern, replace it, or stay separate?"
+4. **Edge case / failure mode** — Pick a specific risk for this feature type: "What should happen when `<specific scenario>`?"
+
+**Feature-type specific (pick ONE relevant to the task):**
+
+| Feature Type | Question |
+|---|---|
+| Auth / security | "Token lifetime and refresh strategy? Session or JWT?" |
+| API endpoint | "Rate limiting required? Authentication? Response format — JSON/protobuf?" |
+| Background job | "Idempotency key? Retry policy on failure? Scheduled or triggered?" |
+| Data migration | "Downtime tolerance? Rollback strategy? Dry-run mode needed?" |
+| Webhook / callback | "Idempotency? Retry expectations? Signature verification?" |
+| Bug fix | "Exact symptom you observed? Any error messages or stack traces?" |
+| Integration | "Sync or async? Failure mode when external system is down?" |
+
+**Present the questions:**
+
+> Before I plan, a few questions to get the scope right:
+>
+> 1. [question 1]
+> 2. [question 2]
+> 3. [question 3]
+> 4. [question 4]
+>
+> Answer each, or type `skip N` for any question you don't want to answer.
+> Type `skip all` to proceed with the original description as-is.
+
+**Wait for user response.** Capture answers.
+
+**For LIGHT tasks with a specific ask**, ask ONE question instead:
+
+> Confirming: [restate the task in your own words]. [One specific clarification, e.g., "Return early on null, throw, or handle upstream?"]
+
+**Enrich the feature description:**
+
+Build an enriched version of the feature request that includes the original + Q&A:
+
+```
+Feature Request (North Star):
+
+Original request: "<exact user input>"
+
+Clarified scope:
+- Out of scope: <from answer 1>
+- Success criteria: <from answer 2>
+- Integration: <from answer 3>
+- Edge case handling: <from answer 4>
+- [Additional clarifications]: <from answer 5 if asked>
+```
+
+This enriched description becomes the **North Star for ALL downstream agents**. Pass it verbatim in every agent prompt.
+
+**Store in workstream state:**
+
+Update `.rival/workstreams/<id>/state.json`:
+
+```json
+{
+  "feature_original": "<exact user input>",
+  "feature_clarified": "<enriched feature description with Q&A>",
+  "clarifications": {
+    "scope_boundary": "<answer>",
+    "success_criteria": "<answer>",
+    "integration": "<answer>",
+    "edge_case": "<answer>"
+  },
+  "clarifications_skipped": ["list of Qs skipped"],
+  ...
+}
+```
+
+**Important:**
+- Be brief. 3-5 questions max. Don't interrogate.
+- Questions must be SPECIFIC to what you can see (reference actual repo names, actual patterns). Generic questions waste the user's time.
+- If the user types confusing or off-topic answers, ask ONE follow-up max, then proceed with what you have.
+- The enriched description is USED by every subsequent phase — research, analysis, synthesis, review.
+
 ## Phase 2: Inline Triage
 
 Classify the task directly — no separate triage agent needed with 1M context.
@@ -232,7 +330,7 @@ Agent(
   description="Research: <feature short name>",
   prompt="
     ## Feature Request (THE NORTH STAR)
-    <original user feature request, VERBATIM>
+    <enriched feature description from Phase 1.8 (or original request if clarification was skipped)>
 
     ## Stack
     <language, framework, test_framework, orm, runtime>
@@ -260,7 +358,7 @@ Agent(
   description="Expert: <domain>",
   prompt="
     ## Feature Request (THE NORTH STAR)
-    <original user feature request, VERBATIM>
+    <enriched feature description from Phase 1.8 (or original request if clarification was skipped)>
 
     ## Expert Domain
     <domain name>
@@ -323,7 +421,7 @@ Agent(
   description="Patterns: <feature short name>",
   prompt="
     ## Feature Request (THE NORTH STAR)
-    <original user feature request, VERBATIM>
+    <enriched feature description from Phase 1.8 (or original request if clarification was skipped)>
 
     ## Primary Repo
     <primary repo name and path>
@@ -361,7 +459,7 @@ Agent(
   description="Explore: <feature short name>",
   prompt="
     ## Feature Request (THE NORTH STAR)
-    <original user feature request, VERBATIM>
+    <enriched feature description from Phase 1.8 (or original request if clarification was skipped)>
 
     ## Primary Repo (EXPLORATION TARGET)
     <primary repo name and path>
@@ -397,7 +495,7 @@ Agent(
   description="Security: <feature short name>",
   prompt="
     ## Feature Request (THE NORTH STAR)
-    <original user feature request, VERBATIM>
+    <enriched feature description from Phase 1.8 (or original request if clarification was skipped)>
 
     ## Primary Repo
     <primary repo name and path>
@@ -448,6 +546,21 @@ Write `.rival/workstreams/<id>/plan.md` with this EXACT structure:
 - Total indexed repos: <N> (available if needed)
 - Review: <Codex reviewed / Claude reviewed / not reviewed (LIGHT)>
 - Lessons applied: <list of lessons from .rival/learning/ that were relevant, or "None — first workstream">
+
+## Feature Request & Clarifications
+
+**Original request:** <exact user input from feature_original in state.json>
+
+**Clarified scope** (from Phase 1.8 Q&A, if clarifications were done):
+- **Out of scope:** <from clarifications.scope_boundary>
+- **Success criteria:** <from clarifications.success_criteria>
+- **Integration:** <from clarifications.integration>
+- **Edge case handling:** <from clarifications.edge_case>
+- **Additional clarifications:** <any 5th clarification if asked>
+
+<If Phase 1.8 was skipped: "Clarifications: skipped (--no-questions flag or detailed original description)">
+
+This section is the AUTHORITATIVE scope for execution. Sub-agents and verifiers should reference this when interpreting tasks — it answers "what did the user actually want?"
 
 ## System Map
 <For MEDIUM/LARGE: Mermaid diagram showing how repos/services connect

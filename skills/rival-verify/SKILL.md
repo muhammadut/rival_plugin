@@ -69,14 +69,19 @@ $(git diff <first-workstream-commit>~1..HEAD)
 $(<test command from plan>)
 
 ## Your Task:
-1. Read the actual source files, not just the diff
-2. Verify each task was implemented correctly
-3. Check for security issues not in the plan
-4. Check test quality — are tests meaningful?
-5. Check for regressions in existing functionality
+1. **Read the "Feature Request & Clarifications" section at the top of plan.md carefully** — this is the authoritative user intent. Verify the code actually delivers the clarified scope, not just what's literally in the tasks.
+2. Read the actual source files, not just the diff
+3. Verify each task was implemented correctly
+4. Verify NO scope violations — nothing was added that the user marked "out of scope"
+5. Verify success criteria from Clarifications section are met
+6. Check for security issues not in the plan
+7. Check test quality — are tests meaningful?
+8. Check for regressions in existing functionality
 
 ## Output:
 ### Verdict: PASS | PASS WITH NOTES | NEEDS FIXES | FAIL
+### Scope Adherence: (Did the implementation stay within clarified scope? Any violations?)
+### Success Criteria Met: (From Clarifications section — yes/no with evidence)
 ### Task Verification: (for each task: verified or issue)
 ### Issues Found: (severity, description, file:line, suggestion)
 ### Security Check: PASS or CONCERNS with details
