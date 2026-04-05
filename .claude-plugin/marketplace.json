@@ -14,7 +14,7 @@
         "repo": "muhammadut/rival_plugin"
       },
       "description": "Research-backed planning, parallel execution, adversarial review (Codex/Claude), persistent lessons learned. Multi-repo support.",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "license": "MIT",
       "keywords": [
         "workflow",
