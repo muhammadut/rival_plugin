@@ -1,6 +1,6 @@
 {
   "name": "@anthropic/rival-plugin",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Production-grade development workflow: research, plan, execute, verify, learn. Multi-repo support with Codex adversarial review.",
   "keywords": [
     "claude-code-plugin",
