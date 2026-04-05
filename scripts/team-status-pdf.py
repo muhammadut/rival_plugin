@@ -248,31 +248,61 @@ def parse_exec_summary(md_path: Optional[Path]) -> str:
     return text
 
 
+def parse_per_repo_sections(md_path: Optional[Path]) -> List[Dict]:
+    """Extract ### `repo-name` sections from the Per-Repo Activity portion."""
+    if not md_path or not md_path.exists():
+        return []
+    content = md_path.read_text(encoding="utf-8")
+    # Find the Per-Repo Activity block
+    section_match = re.search(r"## Per-Repo Activity\s*\n(.+?)(?=\n## |\Z)", content, re.DOTALL)
+    if not section_match:
+        return []
+    block = section_match.group(1)
+
+    repos = []
+    # Each repo subsection starts with ### `repo-name`
+    repo_pattern = re.compile(r"### `([^`]+)`\s*\n(.+?)(?=\n### `|\Z)", re.DOTALL)
+    for m in repo_pattern.finditer(block):
+        name = m.group(1).strip()
+        body = m.group(2).strip()
+        repos.append({"name": name, "body": body})
+    return repos
+
+
 def extract_member_focus(md_path: Optional[Path]) -> Dict[str, str]:
-    """Extract a 1-line focus per member from the markdown (first sentence after heading)."""
+    """Extract a 1-line focus per member from the Per-Member Summary section.
+
+    Format: **Name** · boards · N/N/N · N PRs · N commits · repos — focus text.
+    """
     focus = {}
     if not md_path or not md_path.exists():
         return focus
     content = md_path.read_text(encoding="utf-8")
-    # Match "## Name\n" followed by content
-    for m in re.finditer(r"^## ([A-Z][a-zA-Z\-]+(?:\s+[A-Z][a-zA-Z\-'\.]+)+)\s*\n(.+?)(?=\n^## |\Z)",
-                         content, re.MULTILINE | re.DOTALL):
-        name = m.group(1).strip()
-        if name.lower() in ("executive summary", "at-a-glance visualizations", "at-a-glance",
-                            "repos", "summary", "repos — quick overview"):
+
+    # Find the Per-Member Summary section
+    section_match = re.search(r"## Per-Member Summary\s*\n(.+?)(?=\n## |\Z)", content, re.DOTALL)
+    if not section_match:
+        return focus
+    block = section_match.group(1)
+
+    # Match each line: **Name** ... — focus
+    # The line has " — " (em-dash) separating stats from the focus text
+    for line in block.split("\n"):
+        line = line.strip()
+        if not line.startswith("**"):
             continue
-        body = m.group(2).strip()
-        # Find the "Notes" line or the first paragraph after member stats
-        # Look for the first substantive paragraph (not starting with ### or **)
-        for line in body.split("\n"):
-            line = line.strip()
-            if not line or line.startswith("#") or line.startswith("**") or line.startswith("-"):
-                continue
-            # Take first sentence
-            sentences = re.split(r"(?<=[.!?])\s+", line)
-            if sentences:
-                focus[name] = sentences[0][:180]
-                break
+        # Extract name
+        name_match = re.match(r"\*\*([^*]+)\*\*", line)
+        if not name_match:
+            continue
+        name = name_match.group(1).strip()
+        # Extract text after em-dash (—) which separates stats from focus
+        parts = line.split(" — ", 1)
+        if len(parts) == 2:
+            focus_text = parts[1].strip()
+            # Trim to first sentence-ish (stop at bold markers or end)
+            focus_text = re.sub(r"\*\*[^*]+\*\*\.?$", "", focus_text).strip().rstrip(".")
+            focus[name] = focus_text[:180]
     return focus
 
 
@@ -281,11 +311,28 @@ def escape_xml(text: str) -> str:
 
 
 def safe_paragraph(text: str, style) -> Paragraph:
-    """Escape XML but preserve <b></b> tags."""
-    # Protect <b> tags, escape everything else, restore
-    text = text.replace("<b>", "\x00BOLD_OPEN\x00").replace("</b>", "\x00BOLD_CLOSE\x00")
+    """Escape XML but preserve <b>, <i>, <font> tags."""
+    # Protect tags
+    placeholders = {
+        "<b>": "\x00B_O\x00", "</b>": "\x00B_C\x00",
+        "<i>": "\x00I_O\x00", "</i>": "\x00I_C\x00",
+    }
+    for src, dst in placeholders.items():
+        text = text.replace(src, dst)
+    # Protect <font ...> and </font>
+    font_tags = re.findall(r'<font[^>]*>', text)
+    for i, tag in enumerate(font_tags):
+        text = text.replace(tag, f"\x00FONT_O_{i}\x00", 1)
+    text = text.replace("</font>", "\x00FONT_C\x00")
+
     text = escape_xml(text)
-    text = text.replace("\x00BOLD_OPEN\x00", "<b>").replace("\x00BOLD_CLOSE\x00", "</b>")
+
+    # Restore
+    for src, dst in placeholders.items():
+        text = text.replace(dst, src)
+    for i, tag in enumerate(font_tags):
+        text = text.replace(f"\x00FONT_O_{i}\x00", tag)
+    text = text.replace("\x00FONT_C\x00", "</font>")
     return Paragraph(text, style)
 
 
@@ -435,6 +482,128 @@ def build_heatmap(data: Dict, styles) -> List:
     return story
 
 
+def build_per_repo_section(md_path: Optional[Path], styles) -> List:
+    """Render per-repo activity as compact cards."""
+    repos = parse_per_repo_sections(md_path)
+    story = []
+    if not repos:
+        return story
+
+    story.append(Paragraph("Per-Repo Activity", styles["DH2"]))
+
+    for repo in repos:
+        name = repo["name"]
+        body = repo["body"]
+
+        # Extract structured fields from body
+        what_does = ""
+        activity = ""
+        contributors = ""
+        current_work = []
+        active_prs = []
+        insight = ""
+
+        # Parse "What it does:" line
+        m = re.search(r"\*\*What it does:\*\*\s*(.+?)(?:\n|$)", body)
+        if m:
+            what_does = m.group(1).strip()
+
+        # Activity
+        m = re.search(r"\*\*Activity[^:]*:\*\*\s*(.+?)(?:\n|$)", body)
+        if m:
+            activity = m.group(1).strip()
+
+        # Contributors
+        m = re.search(r"\*\*Contributors:\*\*\s*(.+?)(?:\n|$)", body)
+        if m:
+            contributors = m.group(1).strip()
+
+        # Current work bullets
+        cw_match = re.search(r"\*\*Current work[^:]*:\*\*\s*(.+?)(?=\n\*\*|\Z)", body, re.DOTALL)
+        if cw_match:
+            cw_text = cw_match.group(1).strip()
+            for line in cw_text.split("\n"):
+                line = line.strip()
+                if line.startswith("- "):
+                    current_work.append(line[2:].strip())
+                elif line and not line.startswith("*"):
+                    # Single-line summary
+                    if not current_work:
+                        current_work.append(line)
+
+        # Active PRs bullets
+        pr_match = re.search(r"\*\*Active PRs:\*\*\s*(.+?)(?=\n\*\*|\Z)", body, re.DOTALL)
+        if pr_match:
+            pr_text = pr_match.group(1).strip()
+            for line in pr_text.split("\n"):
+                line = line.strip()
+                if line.startswith("- "):
+                    active_prs.append(line[2:].strip())
+                elif line.lower() == "none.":
+                    active_prs.append("None")
+
+        # Insight
+        m = re.search(r"\*\*What this tells us:\*\*\s*(.+?)(?=\n\*\*|\n---|\Z)", body, re.DOTALL)
+        if m:
+            insight = m.group(1).strip().replace("\n", " ")
+
+        # Build card
+        card_story = []
+        # Repo name header
+        card_story.append(Paragraph(
+            f'<font name="Courier-Bold" size="10" color="{COLORS["accent"]}">{escape_xml(name)}</font>',
+            styles["DBody"],
+        ))
+
+        # Meta line
+        if what_does:
+            card_story.append(safe_paragraph(f"<b>Purpose:</b> {what_does}", styles["DSmall"]))
+        if activity:
+            card_story.append(safe_paragraph(f"<b>Activity:</b> {activity}", styles["DSmall"]))
+        if contributors:
+            card_story.append(safe_paragraph(f"<b>Contributors:</b> {contributors}", styles["DSmall"]))
+
+        # Current work
+        if current_work:
+            card_story.append(Spacer(1, 0.04 * inch))
+            card_story.append(Paragraph("<b>Current work:</b>", styles["DSmall"]))
+            for item in current_work[:6]:
+                card_story.append(safe_paragraph(f"• {item}", styles["DSmall"]))
+
+        # Active PRs
+        if active_prs and active_prs != ["None"]:
+            card_story.append(Spacer(1, 0.04 * inch))
+            card_story.append(Paragraph("<b>Active PRs:</b>", styles["DSmall"]))
+            for pr in active_prs[:4]:
+                card_story.append(safe_paragraph(f"• {pr}", styles["DSmall"]))
+        elif active_prs == ["None"]:
+            card_story.append(safe_paragraph("<b>Active PRs:</b> none", styles["DSmall"]))
+
+        # Insight callout
+        if insight:
+            card_story.append(Spacer(1, 0.04 * inch))
+            card_story.append(safe_paragraph(
+                f'<font color="{COLORS["text_strong"]}"><b>Insight:</b></font> <i>{insight}</i>',
+                styles["DSmall"],
+            ))
+
+        # Wrap as a bordered table
+        card_table = Table([[card_story]], colWidths=[7.4 * inch])
+        card_table.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor(COLORS["border"])),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ]))
+        story.append(card_table)
+        story.append(Spacer(1, 0.08 * inch))
+
+    return story
+
+
 def build_member_table(data: Dict, exec_md_path: Optional[Path], styles) -> List:
     story = []
     story.append(Paragraph("Per-Member Summary", styles["DH2"]))
@@ -538,7 +707,7 @@ def build_pdf(raw_data_path: Path, report_md_path: Optional[Path], output_path: 
     styles = build_styles()
     story = []
 
-    # Page 1: Header + stats + exec summary + main charts
+    # Page 1: Header + stats + exec summary + charts
     story.extend(build_header(data, styles))
     story.append(build_stat_cards(data, styles))
     story.append(Spacer(1, 0.18 * inch))
@@ -546,10 +715,14 @@ def build_pdf(raw_data_path: Path, report_md_path: Optional[Path], output_path: 
     story.append(Spacer(1, 0.05 * inch))
     story.extend(build_charts_grid(data, styles))
 
-    # Page 2: Heatmap + per-member table
+    # Page 2+: Per-repo activity (THE VALUE-ADD)
     story.append(PageBreak())
     story.extend(build_header(data, styles))
-    story.extend(build_heatmap(data, styles))
+    story.extend(build_per_repo_section(report_md_path, styles))
+
+    # Final page: Member reference table
+    story.append(PageBreak())
+    story.extend(build_header(data, styles))
     story.extend(build_member_table(data, report_md_path, styles))
     story.extend(build_footer_note(styles))
 

@@ -81,7 +81,11 @@ For each work item (all of them, but briefly):
 
 ### Step 5: Write the Brief
 
-Write to Output Path. Structure:
+Write to Output Path. The brief is organized around TWO lenses:
+1. **Per-repo activity** (the main value-add — what's happening on each component)
+2. **Per-member summary** (one-line reference)
+
+Structure:
 
 ```markdown
 # Team Brief — <scope> — <date>
@@ -143,6 +147,39 @@ graph LR
 ```
 
 <Use real data — members and themes from the raw-data. Keep diagrams small (3-6 nodes).>
+
+---
+
+## Per-Repo Activity (PRIMARY SECTION — the value-add)
+
+This is the MAIN insight section. For each repo in team_repos, explain what's happening there in 2026. This is where you add value over an ADO dashboard — by connecting tickets to the actual codebase and explaining the work in the context of what the repo DOES.
+
+For EACH repo in team_repos (in order, one section per repo):
+
+### `<repo-name>`
+
+**What it does:** <1-sentence purpose, from README/code scan>
+**Activity this window:** <N> contributors · <N> active tickets · <N> PRs · <N> commits (60d)
+**Contributors:** <comma-separated list of people committing or with tickets/PRs here>
+
+**Current work:**
+<Group the active tickets that map to this repo. For each: name the contributor, 1-line summary tying the ticket to what the repo does. Example:
+- **Tariq** — Wiring up the Service Bus queue consumer (`sbq-initial-rating-requests`) that this service consumes. This is the repo's main entry point.
+- **Bhoomika** — Connecting to the output queue (`sbq-rating-responses`) used to deliver results back via APIM.>
+
+If no active tickets map to this repo: "No active tickets directly mapping to this repo in window. Passive maintenance only."
+
+**Active PRs:**
+<List each open PR in this repo with: PR#, title, author, one-sentence of what it does based on description + files_changed. Example:
+- **#4523 Add retry policy to CarrierAdapter** (Bhavesh) — adds exponential backoff to the carrier HTTP calls in src/Adapters/. Fixes timeout cascades when carriers are slow.>
+
+**What this tells us:**
+<1-2 sentences of insight. Examples:
+- "All Phase 2 carrier adapter work lives here, but only Bhavesh is actively coding it — bottleneck risk."
+- "Multiple people are converging here because this is where the new Service Bus wiring lives. Coordination around queue names is needed."
+- "Zero commits in window and no active tickets — this repo is dormant or fully handed off.">
+
+<Repeat for every repo in team_repos, including ones with no activity. For dormant repos, a 2-line entry is enough.>
 
 ---
 
