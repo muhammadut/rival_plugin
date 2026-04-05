@@ -85,6 +85,9 @@ def load_env(env_path: Path) -> Dict[str, str]:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
+        # Support "export KEY=VALUE" shell format
+        if line.startswith("export "):
+            line = line[7:].lstrip()
         if "=" not in line:
             continue
         key, _, value = line.partition("=")
@@ -307,7 +310,8 @@ class AzureDevOpsClient:
         def esc(v: str) -> str:
             return str(v).replace("'", "''")
 
-        from_date = iso_utc(days_ago(window_days))
+        # WIQL requires date-only precision (YYYY-MM-DD), not timestamp
+        from_date = days_ago(window_days).strftime("%Y-%m-%d")
 
         wiql = (
             "SELECT [System.Id] FROM WorkItems "
@@ -346,17 +350,28 @@ class AzureDevOpsClient:
     # ---- Identity Resolution ----
 
     def resolve_identity(self, name_query: str) -> List[Dict]:
-        """Resolve a name to ADO identities. Returns list of matches."""
-        url = (
-            f"{self.base_api}/_apis/identities"
-            f"?searchFilter=General&filterValue={quote_path_component(name_query)}"
-            f"&api-version={API_VERSION_PREVIEW}"
-        )
+        """Resolve a name to ADO identities via Graph API. Returns list of matches."""
+        # Use vssps.dev.azure.com Graph API (lists org users, supports filtering)
+        url = f"https://vssps.dev.azure.com/{quote_path_component(self.organization)}/_apis/graph/users?api-version={API_VERSION_PREVIEW}"
         try:
             data = self._request(url)
-            return data.get("value", [])
+            users = data.get("value", [])
         except AzureDevOpsError:
             return []
+
+        # Client-side filter by display name, email, or principal name
+        query_lower = name_query.lower().strip()
+        matches = []
+        for user in users:
+            display = (user.get("displayName") or "").lower()
+            mail = (user.get("mailAddress") or "").lower()
+            principal = (user.get("principalName") or "").lower()
+            if (query_lower in display or
+                query_lower == mail or
+                query_lower == principal or
+                query_lower in mail.split("@")[0]):
+                matches.append(user)
+        return matches
 
 
 # ============================================================
@@ -630,14 +645,13 @@ def main(argv: Sequence[str]) -> int:
                 # Take the first match
                 ident = identities[0]
                 members.append({
-                    "name": ident.get("providerDisplayName", name_query),
-                    "email": ident.get("properties", {}).get("Mail", {}).get("$value", "")
-                             or ident.get("descriptor", ""),
+                    "name": ident.get("displayName", name_query),
+                    "email": ident.get("mailAddress") or ident.get("principalName") or "",
                     "commits": 0,
                     "repos_active": [],
                     "last_active": None,
                 })
-                log(f"  Resolved: {name_query} → {ident.get('providerDisplayName', '?')}")
+                log(f"  Resolved: {name_query} → {ident.get('displayName')} <{ident.get('mailAddress')}>")
             else:
                 log(f"  WARNING: could not resolve '{name_query}'")
     else:
