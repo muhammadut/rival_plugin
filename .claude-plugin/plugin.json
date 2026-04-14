@@ -1,5 +1,5 @@
 {
   "name": "rival",
-  "version": "1.9.1",
+  "version": "1.10.0",
   "description": "Production-grade development workflow: research, plan, execute, verify, learn. Multi-repo support with adversarial review."
 }

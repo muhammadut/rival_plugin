@@ -22,32 +22,45 @@ Standard resolution priority (same as other skills).
 
 ### 1.3 Validate Phase
 
-Read `state.json`. Phase must be `build-complete`.
+Read `state.json`. Phase must be `build-complete` or `verified` (re-verify).
 
 - If earlier: Guide to correct next step
 - If `archived`: "This workstream is already complete and archived."
-- If `build-complete`: proceed
+- If `build-complete` or `verified`: proceed
 
 Update state to `verifying`.
 
 ## Phase 2: Gather Verification Context
 
-Collect everything the verifier needs:
+Collect everything the verifier needs. For multi-repo workstreams this is per-repo; for single-repo it's just one entry.
 
-1. **Plan:** `.rival/workstreams/<id>/plan.md` — this is the spec, the single source of truth for what was supposed to be built
-2. **Git diff:** All code changes since the workstream started
-3. **Test results:** Run the test suite and capture output
+1. **Plan:** `.rival/workstreams/<id>/plan.md` — the single source of truth for what was supposed to be built.
 
+2. **Branches and commits per repo:** read `state.json`. The relevant fields:
+   - `state.branches` — map of `{repo-path: { name, role, default_branch }}`. Tells you which branch in which repo, and what its base is for the diff.
+   - `state.build.commits` — map of `{repo-path: { first, last, count }}`. The first/last commit hashes per repo. **Do NOT grep git log for the workstream id — execute records these in state.json directly.**
+   - `state.build.repos_touched` — flat array of repo paths that actually received commits. (Repos in `state.branches` with `count: 0` are pruned.)
+
+3. **Git diff per repo:** for each repo in `state.build.repos_touched`:
 ```bash
-# Get the first workstream commit
-FIRST_COMMIT=$(git log --oneline --all --grep="<workstream-id>" --reverse | head -1 | awk '{print $1}')
+REPO="<repo-path>"
+DEFAULT=$(jq -r ".branches[\"$REPO\"].default_branch" .rival/workstreams/<id>/state.json)
+BRANCH=$(jq -r ".branches[\"$REPO\"].name" .rival/workstreams/<id>/state.json)
 
-# Full diff of all workstream changes
-git diff ${FIRST_COMMIT}~1..HEAD
+# Full diff for this repo's branch vs its default
+git -C "$REPO" diff "origin/$DEFAULT...$BRANCH"
 
-# Run tests (command from plan.md or config)
-<test command from plan or config>
+# Or, equivalently, between first commit's parent and last commit:
+FIRST=$(jq -r ".build.commits[\"$REPO\"].first" .rival/workstreams/<id>/state.json)
+LAST=$(jq  -r ".build.commits[\"$REPO\"].last"  .rival/workstreams/<id>/state.json)
+git -C "$REPO" diff "${FIRST}~1..${LAST}"
 ```
+
+4. **Test results per repo:** run the test commands from the plan's Validation Plan section. In multi-repo, the plan should specify per-repo test commands (or fall back to each repo's `index.repos[*].test_framework`).
+
+5. **Fallback if state is incomplete:** if `state.build.commits` is missing or empty (e.g., the workstream was built by an older version of execute), fall back to:
+   - Try grepping recent git log for `(ws: <workstream-id>)` in commit messages — newer execute embeds this defensively in every commit
+   - If still nothing, ask the user: "I can't find a recorded commit range. What range should I review? (e.g., `HEAD~5..HEAD` for single-repo, or specify per-repo)"
 
 **Auto-suggestion for LARGE workstreams:** If the git diff exceeds 2000 lines or touches more than 20 files, warn the user:
 > "This is a large workstream. Verification will take longer and may benefit from being split. Proceeding anyway."
@@ -127,6 +140,40 @@ If the `codex exec` command exits with a non-zero status or produces no output, 
 
 Then proceed exactly as Path B.
 
+## Phase 4.5: Compute Recommended Merge Order (multi-repo only)
+
+For multi-repo workstreams, the order in which you merge matters. Merging the primary repo first activates new code paths before connected repos have caught up — that's a runtime breakage window. Merging connected repos first is almost always safer because they're additive (new types, new fields, new endpoints) without anyone calling them yet.
+
+Read the plan's "System Map" section plus `state.connected_repos` to determine the dependency direction:
+
+- **Tier 1 (merge first):** repos that EXPORT contracts/types others import (e.g., shared-models, schemas, protocol definitions). Branch role: `connected`.
+- **Tier 2 (merge second):** repos that CONSUME the new contracts but aren't the user-facing entry point. Branch role: `connected`.
+- **Tier 3 (merge LAST):** the primary repo — the one whose feature this is. Once this is merged, users can hit the new feature, so all dependencies must already be live. Branch role: `primary`.
+
+Append a section to `.rival/workstreams/<id>/verification.md`:
+
+```markdown
+## Recommended Merge Order
+
+1. **Rival.CentralSchema.API** (chore/<ws-id>) — Tier 1, exports new types
+   PR: `gh -R <owner>/Rival.CentralSchema.API pr ...`
+   Why first: downstream services import the new type. Merging shared schema first means consumers can pick it up cleanly.
+
+2. **Rival.Customer.API** (chore/<ws-id>) — Tier 2, consumer
+   PR: `gh -R <owner>/Rival.Customer.API pr ...`
+   Why second: depends on Rival.CentralSchema.API@new. Once shared schema is merged and a new package version is published, customer API can update.
+
+3. **Rival.Apps.API** (feature/<ws-id>) — Tier 3, primary
+   PR: `gh -R <owner>/Rival.Apps.API pr ...`
+   Why LAST: this is what activates the user-facing feature. Merging it before customer API would create a window where the new code path exists but the consumer isn't ready, causing 5xx errors.
+
+## Compatibility Window
+
+Between merging Tier 1 and merging Tier 3, the system is in a "ready but not activated" state. This is safe — no user-facing change has happened yet. The window collapses the moment Tier 3 merges. If you need to roll back, roll back in REVERSE order (Tier 3 → Tier 2 → Tier 1).
+```
+
+For single-repo workstreams, skip this phase — there's only one PR to merge.
+
 ## Phase 5: Human Gate (Final)
 
 Read `.rival/workstreams/<id>/verification.md` and present results:
@@ -143,15 +190,16 @@ Read `.rival/workstreams/<id>/verification.md` and present results:
 > Full verification: `.rival/workstreams/<id>/verification.md`
 >
 > **What would you like to do?**
-> 1. **Ship it** — archive workstream, you're done!
+> 1. **Ship it** — mark as verified, run retro to capture lessons
 > 2. **Fix issues** — address the findings and re-verify
-> 3. **Accept as-is** — acknowledge issues but ship anyway"
+> 3. **Accept as-is** — acknowledge issues but mark as verified anyway"
 
 On **Ship it** or **Accept as-is**:
-- Update state to `archived`
+- Update state to `verified` (NOT `archived` — retro is the one that archives, so it can still find this workstream)
+- Append to history with timestamp
 - Print:
-> "Workstream **<id>** archived. All artifacts preserved in `.rival/workstreams/<id>/`.
-> Great work! Consider running `/rival:rival-retro` to capture learnings."
+> "Workstream **<id>** marked as **verified**. All artifacts preserved in `.rival/workstreams/<id>/`.
+> Next: run `/rival:rival-retro` to capture lessons learned. The retro will archive this workstream once it's done."
 
 On **Fix issues**: Keep state at `build-complete`, user fixes and re-runs `/rival:rival-verify`.
 

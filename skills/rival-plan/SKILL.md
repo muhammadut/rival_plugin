@@ -18,13 +18,15 @@ Read `.rival/config.json`. If it doesn't exist, stop and tell the user:
 
 Store the config values — you'll need them throughout:
 - `paths.plugin_root` (absolute path to Rival plugin — needed to find agent definitions)
-- `paths.knowledge_dir` (where repos and wikis are stored)
-- `project_type` (brownfield/greenfield)
-- `stack` (language, framework, test_framework, orm, runtime)
-- `index.repos` (array of {name, path, language, framework})
+- `paths.knowledge_dir` (where ADO-pulled repos and wikis are stored)
+- `workspace_type` (`single-repo` or `multi-repo`)
+- `index.repos` (array of {name, path, language, framework, test_framework, orm, runtime}) — per-repo stack info lives here
 - `index.knowledge_sources` (array of {name, path, type})
+- `index.languages` (convenience breakdown)
 - `experts` (array of expert domain strings)
 - `review.tool` (codex/skeptical-reviewer), `review.fallback`
+
+**Note on stack info:** there is no top-level `stack` field. Each repo's stack lives in `index.repos[*]` as `language`, `framework`, `test_framework`, `orm`, `runtime`. After Phase 1.6 (Primary Repo Selection) you'll have `primary_repo` — its stack info comes from the matching `index.repos` entry. Pass that per-repo stack info into agent prompts as the "Stack" parameter. The `project_type` field is also not used — ignore it.
 
 ### 1.2 Parse Arguments
 

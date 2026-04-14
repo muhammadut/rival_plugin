@@ -19,10 +19,11 @@ Read `.rival/config.json`. If missing:
 Use the standard workstream resolution priority to identify the target workstream:
 
 1. If a workstream name was passed as an argument, use it directly.
-2. If no argument, scan `.rival/workstreams/*/state.json` for active (non-archived) workstreams. Auto-select if only one exists.
-3. If multiple candidates exist, ask the user to choose.
+2. If no argument, scan `.rival/workstreams/*/state.json` for workstreams in phase `verified` or `build-complete`. These are the candidates for retro. Auto-select if only one exists.
+3. If multiple candidates exist, ask the user to choose. Prefer the most recently updated workstream as the suggested default.
+4. If still nothing found, also accept workstreams in phase `archived` whose `retro_completed_at` field is missing — this allows running retro after archiving by hand.
 
-Read `.rival/workstreams/<id>/state.json` to load workstream metadata (name, status, dates, tasks).
+Read `.rival/workstreams/<id>/state.json` to load workstream metadata (name, current phase, dates, tasks, build summary).
 
 ## Step 2: Read All Artifacts
 

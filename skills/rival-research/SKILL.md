@@ -14,10 +14,11 @@ You are a focused research assistant. The user wants to explore an idea, find be
 Read `.rival/config.json` from the project root.
 
 Extract:
-- **stack**: primary language and framework (from config `stack` field)
-- **index.repos**: all indexed repos for cross-repo context
-- **index.languages**: language breakdown across the workspace
+- **index.repos**: all indexed repos for cross-repo context (each entry has `language`, `framework`, `test_framework`, `orm`, `runtime`)
+- **index.languages**: convenience language breakdown across the workspace
 - **experts**: configured expert domains (e.g., "azure", "service-bus", "redis")
+
+**Note:** there is no top-level `stack` field. Stack info is per-repo in `index.repos`. For research that's stack-aware, pass the dominant language(s) from `index.languages` to the research agents.
 
 If `.rival/config.json` does not exist or is incomplete, proceed with basic research but inform the user:
 
@@ -147,7 +148,11 @@ Wait for the user's response before taking action.
 
 When the user selects an option and says "convert" (or words to that effect):
 
-1. **Generate a workstream ID**: Use format `ws-<short-slug>-<timestamp>` (e.g., `ws-realtime-notifications-1712150400`)
+1. **Generate a workstream ID using the SAME format `rival-plan` uses**: take the first 3-4 significant words from the user's research question, slugify them (lowercase, hyphens, no special chars), then append today's date as `YYYYMMDD`.
+
+   Example: question `"Should we use Redis or Memcached for session caching?"` → workstream id `redis-vs-memcached-session-20260413`.
+
+   **Important:** do NOT use `ws-<slug>-<unix-timestamp>` format. The ID must match exactly what `/rival:rival-plan` would generate for the same feature description on the same day, otherwise the preload handoff will not be found by plan's Phase 3.0 check. Ask the user to confirm the slug if it's ambiguous.
 
 2. **Create the research preload file**:
    - Path: `.rival/workstreams/<id>/research-preload.md`

@@ -19,9 +19,12 @@ Read `.rival/config.json`. If missing:
 > "Rival isn't configured. Run `/rival:rival-init` first."
 
 Store:
-- `stack` — language, framework, test_framework (for test commands and sub-agent prompts)
-- `index.repos` — all indexed repos (the plan's metadata identifies which are relevant)
+- `workspace_type` — `single-repo` or `multi-repo` (drives whether sub-agents need to `cd` into a repo)
+- `index.repos` — all indexed repos with per-repo stack info (`language`, `framework`, `test_framework`, `orm`, `runtime`). Sub-agents derive test commands from the matching repo entry, not from a top-level `stack` field.
 - `experts` — expert domains
+- `paths.knowledge_dir` — for cross-referencing where the multi-repo workspace lives
+
+**Note:** there is no top-level `stack` field. Look up stack info per-repo in `index.repos`.
 
 ### 1.2 Resolve Workstream
 
@@ -41,15 +44,94 @@ Read `state.json` from the workstream directory. Phase must be `plan-approved` o
 
 ### 1.4 Check for Uncommitted Changes
 
-Run `git status --porcelain`. If there are uncommitted changes, warn:
-> "You have uncommitted changes in your working tree. Stash them before building? [Y/n]"
+Behavior depends on `workspace_type`:
 
-On **Y**: run `git stash push -m "rival-execute: stash before build"` and proceed.
-On **n**: proceed with warning that conflicts may occur.
+**Single-repo workspace** (`workspace_type == "single-repo"`): run `git status --porcelain` in cwd.
 
-### 1.5 Update State
+**Multi-repo workspace** (`workspace_type == "multi-repo"`): cwd is NOT a git repo (it's the parent directory containing the cloned repos under `knowledge/repos/`). Iterate over `index.repos` and run `git status --porcelain` from inside each repo's path:
 
-Update `state.json` phase to `building`.
+```bash
+for REPO in "${REPOS[@]}"; do
+  ( cd "$REPO" && git status --porcelain )
+done
+```
+
+If any repo has uncommitted changes, list them and warn:
+> "You have uncommitted changes in: <repo names>. Stash them before building? [Y/n]"
+
+On **Y**: stash each affected repo independently:
+```bash
+( cd "$REPO" && git stash push -m "rival-execute: stash before build" )
+```
+On **n**: proceed with warning that conflicts may occur in those repos.
+
+### 1.5 Branch Creation (always — single-repo and multi-repo)
+
+Before any sub-agent runs, create a feature branch in every repo the plan will touch. This is the cross-repo coordination point — once branches exist, every commit lands in a coordinated set that can be reviewed and merged together.
+
+**Step 1 — determine the affected repo set.** Read `.rival/workstreams/<id>/plan.md` and walk every task. Collect the unique set of `Repo:` field values across all tasks. Cross-reference with `state.primary_repo` and `state.connected_repos` from the plan phase. Each repo gets a role:
+- **primary** — `state.primary_repo`. The repo whose feature is being built. Branch prefix: `feature/`.
+- **connected** — appears in `state.connected_repos` AND has tasks targeting it in the plan. Branch prefix: `chore/`. These are upstream-driven compatibility updates.
+- **search-only** — appears in `state.connected_repos` but has NO tasks targeting it. No branch needed; agents only read from it.
+
+**Step 2 — compute branch names.** Use the workstream id as the slug:
+- Primary: `feature/<workstream-id>` (e.g., `feature/async-callbacks-20260413`)
+- Connected: `chore/<workstream-id>` (e.g., `chore/async-callbacks-20260413`)
+
+The same `<workstream-id>` suffix appears in every branch across every repo, so a future engineer can find all related branches across all repos with `git for-each-ref refs/heads | grep async-callbacks-20260413`.
+
+**Step 3 — present to the user up front and get confirmation.** Output:
+
+```
+This feature touches 3 repos. I'll create these branches:
+  ./knowledge/repos/Rival.Apps.API           → feature/async-callbacks-20260413  (primary, 5 tasks)
+  ./knowledge/repos/Rival.CentralSchema.API  → chore/async-callbacks-20260413    (contract update, 1 task)
+  ./knowledge/repos/Rival.Customer.API       → chore/async-callbacks-20260413    (consumer update, 2 tasks)
+
+Search-only (no branches needed): ./knowledge/repos/Rival.Reports.API
+
+All branches will be created from main (or master, auto-detected per repo).
+Proceed with branch creation? [Y/n]
+```
+
+If the user says **n**, abort and leave state at `plan-approved`. If **Y**:
+
+**Step 4 — create branches.** For each affected repo:
+```bash
+# Auto-detect default branch (main vs master)
+DEFAULT=$(git -C "$REPO" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
+DEFAULT="${DEFAULT:-main}"
+git -C "$REPO" fetch origin "$DEFAULT" --quiet
+git -C "$REPO" checkout -B "$BRANCH_NAME" "origin/$DEFAULT"
+```
+
+If a branch with the target name already exists in a repo (from a previous attempt), check it out instead of recreating it — this preserves resume support. Tell the user which branches were created vs reused.
+
+**Step 5 — record branches in state.json.** Update state with both the branch names AND the per-repo build tracking structure that Phase 6.3 and verify will use:
+
+```json
+{
+  "phase": "building",
+  "history": [..., { "phase": "building", "timestamp": "<now>" }],
+  "branches": {
+    "./knowledge/repos/Rival.Apps.API":          { "name": "feature/async-callbacks-20260413", "role": "primary",   "default_branch": "main" },
+    "./knowledge/repos/Rival.CentralSchema.API": { "name": "chore/async-callbacks-20260413",   "role": "connected", "default_branch": "main" },
+    "./knowledge/repos/Rival.Customer.API":      { "name": "chore/async-callbacks-20260413",   "role": "connected", "default_branch": "main" }
+  },
+  "build": {
+    "repos_touched": ["./knowledge/repos/Rival.Apps.API", "./knowledge/repos/Rival.CentralSchema.API", "./knowledge/repos/Rival.Customer.API"],
+    "commits": {
+      "./knowledge/repos/Rival.Apps.API":          { "first": null, "last": null, "count": 0 },
+      "./knowledge/repos/Rival.CentralSchema.API": { "first": null, "last": null, "count": 0 },
+      "./knowledge/repos/Rival.Customer.API":      { "first": null, "last": null, "count": 0 }
+    }
+  }
+}
+```
+
+`commits.<repo>.first/last/count` will be filled in as sub-agents commit through Phase 4. The `default_branch` field is recorded so verify and the merge-order recommendation (Phase 6) know which base each branch should be compared against.
+
+For **single-repo workspaces**, the same logic applies — there's just one entry. Single-repo workstreams still get a `feature/<workstream-id>` branch instead of committing directly to main. This is the consistent UX.
 
 ## Phase 2: Load Plan
 
@@ -170,15 +252,25 @@ You are implementing Task {N.M} from a Rival execution plan.
 ## Your Task
 {paste the task section from plan.md — includes Before/After code, tests, effects}
 
+## Working Branch
+**Repo:** {paste the task's "Repo:" field from plan.md — this is the relative path to the git repo this task lives in}
+**Branch:** {look up state.branches[repo].name — already created and checked out by Phase 1.5}
+**Role:** {state.branches[repo].role — "primary" or "connected"}
+**Workstream id:** {workstream_id}
+
 ## Rules
 1. Implement ONLY what the task specifies. Stay within the clarified scope above — do NOT expand beyond it.
 2. If the task seems to violate the clarified scope (e.g., adds functionality marked "out of scope"), STOP and report FAIL with a scope violation note.
 3. Read files fresh from disk before editing — a teammate may have changed them.
-4. Run the specified tests. All must pass.
-5. Commit with conventional format: feat|fix|refactor: <desc> (task N.M)
-   Use a HEREDOC for the commit message.
-6. Stage specific files only — not git add .
-7. Report results in this exact format:
+4. **All git operations must be scoped to the target repo.** Use `git -C {repo-path} <command>` for every git invocation, or `cd` into the repo first. File paths in `git add` are relative to the repo, not to the workspace root.
+5. **The branch is already checked out by Phase 1.5.** Verify with `git -C {repo-path} branch --show-current` — it should print the Working Branch above. Do NOT switch branches. Do NOT commit to main/master.
+6. Run the specified tests from inside the repo. All must pass.
+7. Commit format depends on the role:
+   - **primary repo (role=primary):** `feat|fix|refactor: <desc> (task N.M, ws: {workstream_id})`
+   - **connected repo (role=connected):** `chore(<short-scope>): <desc> (task N.M, ws: {workstream_id})` — the connected repo isn't getting a feature, it's getting an upstream-driven update
+   Use a HEREDOC for the commit message. Embedding the workstream id is the fallback verify uses if state.json gets corrupted.
+8. Stage specific files only — not git add .
+9. Report results in this exact format:
 
 ## Task Result
 - Status: PASS | FAIL
@@ -285,7 +377,8 @@ Validation: PASS | FAIL
 
 ### 6.3 Update State
 
-Update `state.json` phase to `build-complete`:
+Update `state.json` phase to `build-complete`. Per-repo commit tracking is the key to making verify mechanical and the merge-order recommendation possible:
+
 ```json
 {
   "phase": "build-complete",
@@ -295,11 +388,31 @@ Update `state.json` phase to `build-complete`:
     "tasks_total": "<N>",
     "tasks_skipped": "<N>",
     "tests_passing": "<N>",
-    "first_commit": "<hash>",
-    "last_commit": "<hash>"
+    "repos_touched": ["./knowledge/repos/Rival.Apps.API", "./knowledge/repos/Rival.CentralSchema.API", "./knowledge/repos/Rival.Customer.API"],
+    "commits": {
+      "./knowledge/repos/Rival.Apps.API":          { "first": "abc1234", "last": "def5678", "count": 5 },
+      "./knowledge/repos/Rival.CentralSchema.API": { "first": "ghi9012", "last": "ghi9012", "count": 1 },
+      "./knowledge/repos/Rival.Customer.API":      { "first": "jkl3456", "last": "mno7890", "count": 2 }
+    }
   }
 }
 ```
+
+How to compute these per-repo:
+
+```bash
+# For each repo in branches map:
+for REPO in <each repo from state.branches>; do
+  BRANCH=$(jq -r ".branches[\"$REPO\"].name" .rival/workstreams/<id>/state.json)
+  DEFAULT=$(jq -r ".branches[\"$REPO\"].default_branch" .rival/workstreams/<id>/state.json)
+  # First commit on the branch that's not on default
+  FIRST=$(git -C "$REPO" rev-list "origin/$DEFAULT..$BRANCH" --reverse | head -1)
+  LAST=$(git -C "$REPO" rev-parse "$BRANCH")
+  COUNT=$(git -C "$REPO" rev-list "origin/$DEFAULT..$BRANCH" --count)
+done
+```
+
+If a repo in `state.branches` ended up with `count: 0` (zero commits — the plan listed it but no tasks actually modified it), prune it from `repos_touched` and from the `commits` map.
 
 ### 6.4 Present Summary
 
@@ -307,7 +420,7 @@ Update `state.json` phase to `build-complete`:
 >
 > **Tasks: {N}/{N} completed** {(N skipped) if any}
 > **Tests: {N}/{N} passing**
-> **Commits: {N}**
+> **Commits: {N}** across **{R} repos**
 >
 > **Phase Summary:**
 > | Phase | Tasks | Status | Gate |
@@ -315,13 +428,23 @@ Update `state.json` phase to `build-complete`:
 > | Phase 1: {name} | {N}/{N} | complete | PASS |
 > | Phase 2: {name} | {N}/{N} | complete | PASS |
 >
-> **Commits:**
-> {git log --oneline for workstream commits}
+> **Repos and branches:**
+> | Repo | Role | Branch | Commits | First..Last |
+> |------|------|--------|---------|-------------|
+> | ./knowledge/repos/Rival.Apps.API | primary | feature/{ws-id} | 5 | abc1234..def5678 |
+> | ./knowledge/repos/Rival.CentralSchema.API | connected | chore/{ws-id} | 1 | ghi9012..ghi9012 |
+> | ./knowledge/repos/Rival.Customer.API | connected | chore/{ws-id} | 2 | jkl3456..mno7890 |
 >
-> Review all changes: `git diff {first-commit}~1..HEAD`
+> **PR creation commands** (paste these when ready to open PRs — order doesn't matter for opening, only for merging):
+> ```bash
+> gh -R <owner>/Rival.Apps.API          pr create --base main --head feature/{ws-id} --title 'feat: <feature title>'
+> gh -R <owner>/Rival.CentralSchema.API pr create --base main --head chore/{ws-id}   --title 'chore: <change title>' --body 'Companion to Rival.Apps.API#<num>'
+> gh -R <owner>/Rival.Customer.API      pr create --base main --head chore/{ws-id}   --title 'chore: <change title>' --body 'Companion to Rival.Apps.API#<num>'
+> ```
+>
 > Build log: `.rival/workstreams/{id}/build-log.md`
 >
-> Next step: `/rival:rival-verify` for adversarial code verification."
+> Next step: `/rival:rival-verify` — it will produce a per-repo diff and a recommended **merge order** based on the dependency direction in the plan."
 
 ## Edge Cases
 
