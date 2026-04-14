@@ -5,7 +5,7 @@ user-invocable: true
 argument-hint: [workstream-name]
 ---
 
-# Rival Verify v1.0 — Adversarial Code Verification Orchestrator
+# Rival Verify v1.10 — Multi-Repo Adversarial Code Verification Orchestrator
 
 You are the Rival verification orchestrator. Your job is to get an independent adversarial review of the BUILT CODE from Codex CLI (primary) or the Claude skeptical-reviewer fallback. The plan IS the spec. You run inline in the current conversation.
 
@@ -67,40 +67,61 @@ git -C "$REPO" diff "${FIRST}~1..${LAST}"
 
 ## Phase 3: Build Verification Prompt
 
-Assemble the verification prompt:
+Assemble the verification prompt. The `## Actual Code Changes` and `## Test Results` sections must be built **per repo** by iterating `state.build.repos_touched` — there is no single global git diff in a multi-repo workstream, and trying to run `git diff` from cwd will crash because cwd is not a git repo (it's the parent containing `knowledge/repos/`).
 
-```markdown
-You are performing adversarial code verification.
+Pseudocode for assembling the prompt:
 
-## Implementation Plan (what was supposed to be built):
-$(cat .rival/workstreams/<id>/plan.md)
+```bash
+PROMPT=""
+PROMPT+="You are performing adversarial code verification.\n\n"
+PROMPT+="## Implementation Plan (what was supposed to be built):\n"
+PROMPT+="$(cat .rival/workstreams/<id>/plan.md)\n\n"
 
-## Actual Code Changes:
-$(git diff <first-workstream-commit>~1..HEAD)
+PROMPT+="## Actual Code Changes (per repo):\n\n"
+for REPO in $(jq -r '.build.repos_touched[]' .rival/workstreams/<id>/state.json); do
+  BRANCH=$(jq -r ".branches[\"$REPO\"].name" .rival/workstreams/<id>/state.json)
+  ROLE=$(jq -r ".branches[\"$REPO\"].role" .rival/workstreams/<id>/state.json)
+  FIRST=$(jq -r ".build.commits[\"$REPO\"].first" .rival/workstreams/<id>/state.json)
+  LAST=$(jq  -r ".build.commits[\"$REPO\"].last"  .rival/workstreams/<id>/state.json)
 
-## Test Results:
-$(<test command from plan>)
+  PROMPT+="### $REPO (role: $ROLE, branch: $BRANCH)\n"
+  PROMPT+='```diff\n'
+  PROMPT+="$(git -C "$REPO" diff "${FIRST}~1..${LAST}")\n"
+  PROMPT+='```\n\n'
+done
 
-## Your Task:
-1. **Read the "Feature Request & Clarifications" section at the top of plan.md carefully** — this is the authoritative user intent. Verify the code actually delivers the clarified scope, not just what's literally in the tasks.
-2. Read the actual source files, not just the diff
-3. Verify each task was implemented correctly
-4. Verify NO scope violations — nothing was added that the user marked "out of scope"
-5. Verify success criteria from Clarifications section are met
-6. Check for security issues not in the plan
-7. Check test quality — are tests meaningful?
-8. Check for regressions in existing functionality
+PROMPT+="## Test Results (per repo):\n\n"
+# For each repo, run the test command. Source: plan.md Validation Plan section
+# (which should be structured per-repo for multi-repo workstreams).
+# If the plan only specifies one global test command, run it once and label it accordingly.
+# Do NOT try to derive a runnable command from index.repos[*].test_framework alone — that's
+# a framework name (e.g., "xunit"), not a command. Ask the user if the plan didn't specify.
+
+PROMPT+="## Your Task:
+1. **Read the 'Feature Request & Clarifications' section at the top of plan.md carefully** — this is the authoritative user intent. Verify the code actually delivers the clarified scope, not just what's literally in the tasks.
+2. Read the actual source files, not just the diff. Each diff is scoped to one repo — read source files via the same repo path.
+3. Verify each task was implemented correctly. The 'Repo:' field in each task tells you which repo's diff to look at.
+4. Verify NO scope violations — nothing was added that the user marked 'out of scope'.
+5. Verify success criteria from Clarifications section are met.
+6. Check for security issues not in the plan.
+7. Check test quality — are tests meaningful? (per repo)
+8. Check for regressions in existing functionality (per repo).
+9. **Cross-repo coherence check (multi-repo only):** if the primary repo introduces a new contract (type, endpoint, event), verify the connected repos are using it correctly. Mismatches between primary's exports and connected's usage are the most common multi-repo bug class.
 
 ## Output:
 ### Verdict: PASS | PASS WITH NOTES | NEEDS FIXES | FAIL
 ### Scope Adherence: (Did the implementation stay within clarified scope? Any violations?)
 ### Success Criteria Met: (From Clarifications section — yes/no with evidence)
 ### Task Verification: (for each task: verified or issue)
-### Issues Found: (severity, description, file:line, suggestion)
+### Issues Found: (severity, description, repo:file:line, suggestion)
+### Cross-repo Coherence: (PASS or list of mismatches)
 ### Security Check: PASS or CONCERNS with details
+"
 ```
 
 Write the assembled prompt to `.rival/workstreams/<id>/codex-verify-prompt.md`.
+
+For **single-repo workstreams**, the loop runs once with one entry — same template, just shorter output. No special-case code path needed.
 
 ## Phase 4: Execute Verification
 
@@ -142,7 +163,9 @@ Then proceed exactly as Path B.
 
 ## Phase 4.5: Compute Recommended Merge Order (multi-repo only)
 
-For multi-repo workstreams, the order in which you merge matters. Merging the primary repo first activates new code paths before connected repos have caught up — that's a runtime breakage window. Merging connected repos first is almost always safer because they're additive (new types, new fields, new endpoints) without anyone calling them yet.
+**Skip-condition (explicit):** if `len(state.build.repos_touched) <= 1`, this is effectively a single-repo workstream — there's only one PR to merge, and a merge-order recommendation would be vacuous. Skip Phase 4.5 entirely and proceed to Phase 5.
+
+For multi-repo workstreams (`len(state.build.repos_touched) >= 2`), the order in which you merge matters. Merging the primary repo first activates new code paths before connected repos have caught up — that's a runtime breakage window. Merging connected repos first is almost always safer because they're additive (new types, new fields, new endpoints) without anyone calling them yet.
 
 Read the plan's "System Map" section plus `state.connected_repos` to determine the dependency direction:
 
