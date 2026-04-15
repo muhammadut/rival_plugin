@@ -44,6 +44,18 @@ Do NOT use AskUserQuestion — just ask questions via normal text output and wai
 
 The steps below MUST be executed IN ORDER. Do NOT skip ahead to repo scanning. Do NOT report "no repos found" before the Azure DevOps pull has been offered.
 
+### Step 0 (MANDATORY): Resolve project root
+
+**Before any file read, file write, or directory creation, pin the project root to the user's current working directory.** This makes the plugin CWD-agnostic and shippable — `.rival/` must land wherever the user invoked `/rival:rival-init`, never in the plugin install directory, never in a hardcoded path.
+
+1. Run `pwd` via `Bash` and capture the output as `PROJECT_ROOT` (remember it for the rest of this session). Store it later as `paths.workspace_root` in `config.json`.
+2. Every `.rival/...` path referenced below is shorthand for `$PROJECT_ROOT/.rival/...`. When you call:
+   - `Bash mkdir -p` → use `"$PROJECT_ROOT/.rival/..."` (quoted, absolute).
+   - `Write` → pass the absolute path `<PROJECT_ROOT>/.rival/config.json`, NEVER a bare relative path (the `Write` tool rejects relatives).
+   - `Read` / `Glob` for repo indexing → scope to `$PROJECT_ROOT`.
+3. If `pwd` returns the plugin marketplace directory (contains `marketplaces/rival-plugin` in the path) or the user's home directory with no project context, STOP and ask: "I'm about to initialize Rival in `<path>` — is that the workspace you want? If not, `cd` into your workspace and re-run `/rival:rival-init`." Do not proceed without confirmation.
+4. Note: `paths.plugin_root` (discovered in Step 1) is distinct from `$PROJECT_ROOT`. `plugin_root` points to the Rival plugin install dir (used to find `export-ado-knowledge.py`); `$PROJECT_ROOT` is the user's workspace where `.rival/` is created.
+
 ### Step 1: Discover Plugin & Environment
 
 Before doing anything else, the init skill must discover where its own tools are and what platform it's running on. This step runs silently — no user interaction needed.
